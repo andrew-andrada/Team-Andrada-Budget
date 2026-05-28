@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Andrada Family Budget</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<!-- Firebase (cloud sync) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -152,7 +156,16 @@ tr:hover td{background:#faf9f6;}
 /* TOAST */
 .toast{position:fixed;bottom:18px;right:18px;background:var(--text);color:#fff;padding:9px 15px;border-radius:var(--radius);font-size:12px;font-weight:500;z-index:999;opacity:0;transform:translateY(5px);transition:all .2s;pointer-events:none;}
 .toast.show{opacity:1;transform:translateY(0);}
+/* AUTH / SYNC */
+.header-right{display:flex;align-items:center;gap:14px;}
+.auth-area{display:flex;align-items:center;gap:8px;}
+.auth-email{font-size:11px;color:var(--muted);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sync-status{font-size:10px;font-weight:600;color:var(--green);background:var(--green-light);padding:2px 8px;border-radius:20px;white-space:nowrap;}
+.sync-status.saving{color:var(--amber);background:var(--amber-light);}
+.sync-status.error{color:var(--red);background:var(--red-light);}
 @media(max-width:760px){
+  .header-right{gap:8px;}
+  .auth-email{display:none;}
   main{padding:12px;}header{padding:0 12px;}
   .summary-row{grid-template-columns:repeat(2,1fr);gap:12px;}
   .sum-cell{border-right:none;padding:0;}
@@ -165,12 +178,15 @@ tr:hover td{background:#faf9f6;}
 
 <header>
   <div class="logo">Andrada Family Budget <span class="logo-month" id="active-month-label"></span></div>
-  <div class="tabs">
-    <button class="tab active" onclick="switchTab('upload')">Upload</button>
-    <button class="tab" onclick="switchTab('dashboard')">Dashboard</button>
-    <button class="tab" onclick="switchTab('transactions')">Transactions</button>
-    <button class="tab" onclick="switchTab('settings')">Settings</button>
-    <button class="tab" onclick="switchTab('export')">Export</button>
+  <div class="header-right">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('upload')">Upload</button>
+      <button class="tab" onclick="switchTab('dashboard')">Dashboard</button>
+      <button class="tab" onclick="switchTab('transactions')">Transactions</button>
+      <button class="tab" onclick="switchTab('settings')">Settings</button>
+      <button class="tab" onclick="switchTab('export')">Export</button>
+    </div>
+    <div id="auth-area" class="auth-area"></div>
   </div>
 </header>
 
@@ -539,6 +555,7 @@ function loadSettings(){
 }
 function saveSettings(){
   try{localStorage.setItem('andrada-budget-settings',JSON.stringify(settings));}catch(e){}
+  if(currentUser&&!applyingRemote)pushToCloud();
 }
 
 let settings=loadSettings();
@@ -554,6 +571,7 @@ function saveTransactions(){
     }))));
     updateDataStatus();
   }catch(e){}
+  if(currentUser&&!applyingRemote)pushToCloud();
 }
 function loadTransactions(){
   try{
@@ -1097,6 +1115,111 @@ function switchTab(tab){
 }
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
 
+// ── CLOUD SYNC (Firebase) ─────────────────────────────────────────
+// Paste your Firebase web-app config below to enable cross-device sync.
+// Until real values are filled in, the app runs in local-only mode.
+const firebaseConfig={
+  apiKey:"AIzaSyA6TXDtJwTfLNGe4KjiOKV1diEYJMMGU-I",
+  authDomain:"team-andrada-budget.firebaseapp.com",
+  projectId:"team-andrada-budget",
+  storageBucket:"team-andrada-budget.firebasestorage.app",
+  messagingSenderId:"629072318113",
+  appId:"1:629072318113:web:0914ebc5470a2633db2ae0"
+};
+const CLOUD_ENABLED=!String(firebaseConfig.apiKey).startsWith('PASTE');
+let fbAuth=null,fbDb=null,currentUser=null,cloudUnsub=null,applyingRemote=false,cloudWriteTimer=null;
+
+function initFirebase(){
+  if(!CLOUD_ENABLED||typeof firebase==='undefined'){updateAuthUI();return;}
+  try{
+    firebase.initializeApp(firebaseConfig);
+    fbAuth=firebase.auth();
+    fbDb=firebase.firestore();
+    fbAuth.onAuthStateChanged(handleAuthChange);
+  }catch(e){console.error('Firebase init failed',e);}
+  updateAuthUI();
+}
+function signInGoogle(){
+  if(!fbAuth){showToast('Cloud sync not configured yet');return;}
+  fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>showToast('Sign-in failed: '+e.message));
+}
+function signOutUser(){ if(fbAuth)fbAuth.signOut(); }
+function mergeSettings(s){
+  return Object.assign({},DEFAULT_SETTINGS,s,{corrections:s.corrections||{},categories:s.categories||[...ALL_CATS]});
+}
+function cloudTxnArray(){
+  return allTransactions.map(t=>({date:t.date,description:t.description,category:t.category,
+    amount:t.amount,card:t.card,bucket:t.bucket,
+    dateObj:(t.dateObj&&!isNaN(t.dateObj))?t.dateObj.toISOString():null}));
+}
+function fromCloudTxns(arr){
+  return (arr||[]).map(t=>({...t,dateObj:t.dateObj?new Date(t.dateObj):parseDate(t.date)}));
+}
+function handleAuthChange(user){
+  currentUser=user;
+  updateAuthUI();
+  if(cloudUnsub){cloudUnsub();cloudUnsub=null;}
+  if(!user)return;
+  setSyncStatus('Syncing…','saving');
+  const ref=fbDb.collection('budgets').doc(user.uid);
+  ref.get().then(snap=>{
+    const cloud=snap.exists?snap.data():null;
+    const cloudTxns=fromCloudTxns(cloud&&cloud.transactions);
+    // First sign-in: merge any local-only transactions into the cloud set (dedup) so nothing is lost
+    const seen=new Set(cloudTxns.map(txnSig));
+    const merged=cloudTxns.slice();let fromLocal=0;
+    allTransactions.forEach(t=>{const s=txnSig(t);if(!seen.has(s)){seen.add(s);merged.push(t);fromLocal++;}});
+    applyingRemote=true;
+    allTransactions=merged;
+    if(cloud&&cloud.settings)settings=mergeSettings(cloud.settings);
+    saveSettings();saveTransactions();
+    rebuildMonths(settings.lastMonth);
+    if(document.getElementById('income-inp'))document.getElementById('income-inp').value=settings.income!=null?settings.income:document.getElementById('income-inp').value;
+    applyingRemote=false;
+    if(!snap.exists||fromLocal>0)pushToCloud(true);
+    cloudUnsub=ref.onSnapshot(handleCloudSnapshot,err=>{setSyncStatus('Error','error');console.error(err);});
+    setSyncStatus('Synced');
+    showToast('✓ Cloud sync on'+(fromLocal>0?` · ${fromLocal} local merged`:''));
+  }).catch(e=>{setSyncStatus('Error','error');showToast('Cloud load failed: '+e.message);});
+}
+function handleCloudSnapshot(snap){
+  if(!snap.exists||snap.metadata.hasPendingWrites)return; // ignore our own un-acked writes
+  const data=snap.data();
+  applyingRemote=true;
+  if(data.settings)settings=mergeSettings(data.settings);
+  if(Array.isArray(data.transactions))allTransactions=fromCloudTxns(data.transactions);
+  saveSettings();saveTransactions();
+  rebuildMonths(settings.lastMonth);
+  if(document.getElementById('page-settings').classList.contains('active'))renderSettings();
+  applyingRemote=false;
+  setSyncStatus('Synced');
+}
+function pushToCloud(immediate){
+  if(!currentUser||!fbDb)return;
+  setSyncStatus('Saving…','saving');
+  clearTimeout(cloudWriteTimer);
+  const doWrite=()=>fbDb.collection('budgets').doc(currentUser.uid).set({
+    transactions:cloudTxnArray(),settings:settings,updatedAt:Date.now()
+  }).then(()=>setSyncStatus('Synced')).catch(e=>{setSyncStatus('Error','error');showToast('Sync error: '+e.message);});
+  if(immediate)doWrite();else cloudWriteTimer=setTimeout(doWrite,900);
+}
+function setSyncStatus(txt,cls){
+  const el=document.getElementById('sync-status');if(!el)return;
+  el.textContent=txt;el.className='sync-status'+(cls?' '+cls:'');
+}
+function updateAuthUI(){
+  const area=document.getElementById('auth-area');if(!area)return;
+  if(!CLOUD_ENABLED){area.innerHTML='';return;}
+  if(currentUser){
+    const name=currentUser.email||currentUser.displayName||'Signed in';
+    area.innerHTML=`<span id="sync-status" class="sync-status">Synced</span>`+
+      `<span class="auth-email" title="${name}">${name}</span>`+
+      `<button class="btn btn-sm" onclick="signOutUser()">Sign out</button>`;
+  }else{
+    area.innerHTML=`<button class="btn btn-sm btn-primary" onclick="signInGoogle()">Sign in to sync</button>`;
+  }
+}
+
 // ── INIT: restore saved data on load ──────────────────────────────
 (function init(){
   if(settings.income!=null&&!isNaN(settings.income))document.getElementById('income-inp').value=settings.income;
@@ -1107,6 +1230,7 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
     rebuildMonths(settings.lastMonth);
     switchTab('dashboard');
   }
+  initFirebase();
 })();
 </script>
 </body>
