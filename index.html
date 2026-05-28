@@ -636,6 +636,12 @@ function shouldExclude(txn){
   const desc=txn.description||'';
   return settings.exclusions.some(e=>e&&desc.toLowerCase().includes(e.toLowerCase()));
 }
+// Retroactively drop already-stored transactions that now match an exclusion. Returns count removed.
+function applyExclusions(){
+  const before=allTransactions.length;
+  allTransactions=allTransactions.filter(t=>!shouldExclude(t));
+  return before-allTransactions.length;
+}
 
 // ── FILE HANDLING ─────────────────────────────────────────────────
 function handleFiles(files){
@@ -710,6 +716,7 @@ function mergeAndFinalize(incoming){
   const seen=new Set(allTransactions.map(txnSig));
   let added=0;
   incoming.forEach(t=>{const s=txnSig(t);if(!seen.has(s)){seen.add(s);allTransactions.push(t);added++;}});
+  applyExclusions(); // honor exclusions retroactively, including previously-stored rows
   saveTransactions();
   const dup=incoming.length-added;
   rebuildMonths(selectedMonth);
@@ -1044,8 +1051,11 @@ function renderExportSummary(){
 
 // ── SETTINGS UI ───────────────────────────────────────────────────
 function persistSettings(){
+  const removed=applyExclusions();
   saveSettings();
-  showToast('✓ Settings saved — re-process files to apply');
+  saveTransactions();
+  if(removed>0)rebuildMonths(selectedMonth);
+  showToast(removed>0?`✓ Saved · removed ${removed} now-excluded transaction${removed!==1?'s':''}`:'✓ Settings saved');
 }
 function renderSettings(){
   // Corrections log
