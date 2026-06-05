@@ -155,7 +155,7 @@ tr:hover td{background:#faf9f6;}
 .export-desc{color:var(--muted);font-size:11px;margin-bottom:14px;line-height:1.5;}
 /* TOAST */
 .toast{position:fixed;bottom:18px;right:18px;background:var(--text);color:#fff;padding:9px 15px;border-radius:var(--radius);font-size:12px;font-weight:500;z-index:999;opacity:0;transform:translateY(5px);transition:all .2s;pointer-events:none;}
-.toast.show{opacity:1;transform:translateY(0);}
+.toast.show{opacity:1;transform:translateY(0);pointer-events:auto;}
 /* AUTH / SYNC */
 .header-right{display:flex;align-items:center;gap:14px;}
 .auth-area{display:flex;align-items:center;gap:8px;}
@@ -189,7 +189,19 @@ tr.row-selected td{background:var(--green-light)!important;}
 .notes-edit ul{padding-left:18px;margin:4px 0;}
 .notes-edit ol{padding-left:18px;margin:4px 0;}
 .notes-edit p{margin:4px 0;}
+/* TRENDS + RECURRING */
+.dash-trends{display:grid;grid-template-columns:1fr 340px;gap:12px;margin-bottom:14px;}
+.trends-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap;}
+.recurring-card .cat-table tr td{padding:6px 0;border-bottom:1px solid #f5f2ec;}
+.recurring-empty{font-size:11px;color:var(--muted);padding:14px 4px;line-height:1.5;}
+/* SEARCH-SCOPE */
+.search-scope{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:pointer;user-select:none;}
+.search-scope input{cursor:pointer;}
+/* TOAST ACTION */
+.toast-action{margin-left:12px;background:none;border:none;color:#f4c542;font-weight:600;cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:0;font-family:inherit;}
+.toast-action:hover{text-decoration:underline;}
 @media(max-width:760px){
+  .dash-trends{grid-template-columns:1fr;}
   .header-right{gap:8px;}
   .auth-email{display:none;}
   main{padding:12px;}header{padding:0 12px;}
@@ -344,6 +356,23 @@ tr.row-selected td{background:var(--green-light)!important;}
       </div>
     </div>
   </div>
+  <!-- Trends + Recurring bills -->
+  <div class="dash-trends">
+    <div class="chart-card">
+      <div class="trends-header">
+        <div class="chart-title" style="margin-bottom:0">Month-over-Month Trends</div>
+        <select class="filter-sel" id="trends-mode" onchange="renderTrends()">
+          <option value="bucket">By Bucket</option>
+          <option value="category">By Category</option>
+        </select>
+      </div>
+      <div style="position:relative;width:100%;height:240px;"><canvas id="trends-chart"></canvas></div>
+    </div>
+    <div class="chart-card recurring-card">
+      <div class="chart-title">Recurring Bills <span style="color:var(--muted);font-weight:400;font-size:11px">~$<span id="recurring-total">0.00</span>/mo</span></div>
+      <table class="cat-table" style="margin-top:6px"><tbody id="recurring-body"></tbody></table>
+    </div>
+  </div>
   <!-- Per-month notes -->
   <div class="chart-card notes-card">
     <div class="notes-header">
@@ -374,6 +403,7 @@ tr.row-selected td{background:var(--green-light)!important;}
   <div class="table-card">
     <div class="table-toolbar">
       <input class="search-inp" type="text" placeholder="Search descriptions…" id="search-inp" oninput="renderTable()">
+      <label class="search-scope" title="Search across every month, ignoring the current month filter"><input type="checkbox" id="search-all-months" onchange="renderTable()"> All months</label>
       <select class="filter-sel" id="cat-filter" onchange="renderTable()"><option value="">All categories</option></select>
       <select class="filter-sel" id="card-filter" onchange="renderTable()"><option value="">All cards</option></select>
       <select class="filter-sel" id="bucket-filter" onchange="renderTable()">
@@ -676,8 +706,11 @@ function txnSig(t){
 
 // ── STATE ─────────────────────────────────────────────────────────
 let rawFiles=[],allTransactions=[],filteredTransactions=[],selectedMonth=null,fileCards={};
-let catChart,cardChart,dailyChart,activeBadgeIdx=null;
+let catChart,cardChart,dailyChart,trendsChart,activeBadgeIdx=null;
 let selectedTxns=new Set(); // signatures of bulk-selected transactions
+let pendingUndo=null; // last delete batch, restorable for 5s
+let tableScopeAll=false; // true when the Transactions tab is showing All months
+function getTxnByIdx(idx){return tableScopeAll?allTransactions[idx]:filteredTransactions[idx];}
 
 // ── CSV PARSER ────────────────────────────────────────────────────
 function parseCSV(text){
@@ -868,7 +901,7 @@ function noteFmt(cmd){
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
-function renderDashboard(){updateSummary();renderBuckets();renderCharts();renderCatSummary();}
+function renderDashboard(){updateSummary();renderBuckets();renderCharts();renderCatSummary();renderTrends();renderRecurring();}
 
 function updateSummary(){
   const income=parseFloat(document.getElementById('income-inp').value)||0;
@@ -982,13 +1015,20 @@ function renderTable(){
   const cardF=document.getElementById('card-filter').value;
   const bucketF=document.getElementById('bucket-filter').value;
   const sort=document.getElementById('sort-sel').value;
-  const cats=[...new Set(filteredTransactions.map(t=>t.category))].sort();
-  const cards=[...new Set(filteredTransactions.map(t=>t.card))].sort();
+  const allMonths=!!document.getElementById('search-all-months')?.checked;
+  tableScopeAll=allMonths;
+  const source=allMonths?allTransactions:filteredTransactions;
+  // Repopulate filters from active source (keep prior selection if still valid)
+  const cats=[...new Set(source.map(t=>t.category))].filter(Boolean).sort();
+  const cards=[...new Set(source.map(t=>t.card))].filter(Boolean).sort();
   const catSel=document.getElementById('cat-filter');const cardSel=document.getElementById('card-filter');
-  if(catSel.options.length<=1)cats.forEach(c=>catSel.add(new Option(c,c)));
-  if(cardSel.options.length<=1)cards.forEach(c=>cardSel.add(new Option(c,c)));
+  const cvKeep=catSel.value,cdKeep=cardSel.value;
+  catSel.innerHTML='<option value="">All categories</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  cardSel.innerHTML='<option value="">All cards</option>'+cards.map(c=>`<option value="${c}">${c}</option>`).join('');
+  if(cats.includes(cvKeep))catSel.value=cvKeep;
+  if(cards.includes(cdKeep))cardSel.value=cdKeep;
   updateCardDatalist();
-  let data=filteredTransactions.filter(t=>{
+  let data=source.filter(t=>{
     if(search&&!t.description.toLowerCase().includes(search))return false;
     if(catF&&t.category!==catF)return false;
     if(cardF&&t.card!==cardF)return false;
@@ -999,7 +1039,7 @@ function renderTable(){
   if(sort==='date-desc')data.sort((a,b)=>b.dateObj-a.dateObj);
   if(sort==='amount-desc')data.sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));
   if(sort==='amount-asc')data.sort((a,b)=>Math.abs(a.amount)-Math.abs(b.amount));
-  document.getElementById('txn-count-label').textContent=`${data.length} of ${filteredTransactions.length} transactions`;
+  document.getElementById('txn-count-label').textContent=`${data.length} of ${source.length} transaction${source.length!==1?'s':''}${allMonths?' (all months)':''}`;
   // Refresh the bulk-bar category dropdown to match current categories
   const bcs=document.getElementById('bulk-cat-sel');
   if(bcs){
@@ -1010,9 +1050,9 @@ function renderTable(){
   const body=document.getElementById('txn-body');
   if(!data.length){body.innerHTML='<tr><td colspan="8" style="text-align:center;padding:26px;color:var(--muted)">No transactions match filters</td></tr>';updateBulkBar();return;}
   body.innerHTML=data.map(t=>{
-    const gi=filteredTransactions.indexOf(t);
+    const gi=source.indexOf(t);
     const sig=txnSig(t);const checked=selectedTxns.has(sig);
-    const d=t.dateObj;const ds=`${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+    const d=t.dateObj;const ds=allMonths?`${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${String(d.getFullYear()).slice(-2)}`:`${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
     const cc=CAT_COLORS[t.category]||'#888';const bm=BUCKET_META[t.bucket||'none'];const isNeg=t.amount<0;
     const catOptions=settings.categories.map(c=>`<option value="${c}" ${c===t.category?'selected':''}>${c}</option>`).join('');
     const safeSig=sig.replace(/"/g,'&quot;');
@@ -1040,14 +1080,16 @@ function openBucketMenu(e,idx){
 }
 function assignBucket(bucket){
   if(activeBadgeIdx===null)return;
-  filteredTransactions[activeBadgeIdx].bucket=bucket;
-  saveTransactions();
+  const t=getTxnByIdx(activeBadgeIdx);
   document.getElementById('bk-menu').style.display='none';activeBadgeIdx=null;
+  if(!t)return;
+  t.bucket=bucket;
+  saveTransactions();
   renderTable();renderDashboard();
   showToast('✓ Bucket updated');
 }
 function updateCategory(idx,newCat){
-  const t=filteredTransactions[idx];
+  const t=getTxnByIdx(idx);if(!t)return;
   t.category=newCat;
   t.bucket=settings.bucketDefaults[newCat]||'none';
   // Save to corrections log so it's remembered next upload
@@ -1057,21 +1099,18 @@ function updateCategory(idx,newCat){
   showToast('✓ Category saved & remembered');
 }
 function deleteTransaction(idx){
-  const t=filteredTransactions[idx];
-  // Log as excluded description so it's auto-removed next upload
-  if(t.description&&!settings.exclusions.includes(t.description)){
-    settings.exclusions.push(t.description);
-    saveSettings();
-  }
-  filteredTransactions.splice(idx,1);
-  const ai=allTransactions.indexOf(t);
-  if(ai>-1)allTransactions.splice(ai,1);
+  const t=getTxnByIdx(idx);if(!t)return;
+  const wasNewExcl=t.description&&!settings.exclusions.includes(t.description);
+  if(wasNewExcl){settings.exclusions.push(t.description);saveSettings();}
+  const ai=allTransactions.indexOf(t);if(ai>-1)allTransactions.splice(ai,1);
+  const fi=filteredTransactions.indexOf(t);if(fi>-1)filteredTransactions.splice(fi,1);
   saveTransactions();
+  pendingUndo={txns:[t],exclusionsAdded:wasNewExcl?[t.description]:[]};
   renderTable();renderDashboard();
-  showToast('✓ Removed & won\'t appear next upload');
+  showToast('✓ Removed — won\'t appear next upload',{duration:5000,action:{label:'Undo',handler:undoLastDelete}});
 }
 function updateAmount(idx,val){
-  const t=filteredTransactions[idx];if(!t)return;
+  const t=getTxnByIdx(idx);if(!t)return;
   const n=parseFloat(val);
   if(isNaN(n)){renderTable();return;}
   t.amount=n;
@@ -1132,12 +1171,14 @@ function bulkSetBucket(b){
 }
 function bulkDelete(){
   const n=selectedTxns.size;if(!n)return;
-  if(!confirm(`Delete ${n} selected transaction${n!==1?'s':''}? This cannot be undone.`))return;
+  if(!confirm(`Delete ${n} selected transaction${n!==1?'s':''}?`))return;
+  const removed=allTransactions.filter(t=>selectedTxns.has(txnSig(t)));
   allTransactions=allTransactions.filter(t=>!selectedTxns.has(txnSig(t)));
   filteredTransactions=filteredTransactions.filter(t=>!selectedTxns.has(txnSig(t)));
   saveTransactions();
+  pendingUndo={txns:removed,exclusionsAdded:[]};
   clearSelection();renderTable();renderDashboard();
-  showToast(`✓ Removed ${n} transaction${n!==1?'s':''}`);
+  showToast(`✓ Removed ${n} transaction${n!==1?'s':''}`,{duration:5000,action:{label:'Undo',handler:undoLastDelete}});
 }
 // ── MANUAL TRANSACTION ENTRY ──────────────────────────────────────
 function openAddTxn(){
@@ -1180,12 +1221,128 @@ function submitAddTxn(){
   showToast(`✓ Added: ${desc}`);
 }
 function updateCard(idx,val){
-  const t=filteredTransactions[idx];if(!t)return;
+  const t=getTxnByIdx(idx);if(!t)return;
   t.card=(val||'').trim();
   saveTransactions();
   document.getElementById('card-filter').innerHTML='<option value="">All cards</option>';
   renderTable();renderDashboard();
   showToast('✓ Card updated');
+}
+// ── UNDO LAST DELETE ──────────────────────────────────────────────
+function undoLastDelete(){
+  if(!pendingUndo)return;
+  const {txns,exclusionsAdded}=pendingUndo;
+  txns.forEach(t=>allTransactions.push(t));
+  if(exclusionsAdded&&exclusionsAdded.length){
+    settings.exclusions=settings.exclusions.filter(e=>!exclusionsAdded.includes(e));
+    saveSettings();
+  }
+  pendingUndo=null;
+  saveTransactions();
+  rebuildMonths(selectedMonth);
+  showToast(`↩ Restored ${txns.length} transaction${txns.length!==1?'s':''}`);
+}
+// ── MONTH-OVER-MONTH TRENDS ───────────────────────────────────────
+function renderTrends(){
+  const canvas=document.getElementById('trends-chart');if(!canvas)return;
+  // Group transactions by YYYY-MM
+  const byMonth={};
+  allTransactions.forEach(t=>{
+    if(!t.dateObj||isNaN(t.dateObj))return;
+    const d=t.dateObj;const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    if(!byMonth[key])byMonth[key]={byBucket:{joint:0,hapi:0,medical:0,special:0,none:0},byCat:{}};
+    const b=t.bucket||'none';
+    byMonth[key].byBucket[b]=(byMonth[key].byBucket[b]||0)+t.amount;
+    byMonth[key].byCat[t.category]=(byMonth[key].byCat[t.category]||0)+t.amount;
+  });
+  const months=Object.keys(byMonth).sort().slice(-12); // last 12 months
+  if(trendsChart){trendsChart.destroy();trendsChart=null;}
+  if(months.length<2){
+    const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle='#666';ctx.font='12px Inter, sans-serif';ctx.textAlign='center';
+    ctx.fillText('Need at least 2 months of data to show trends.',canvas.width/2,canvas.height/2);
+    return;
+  }
+  const labels=months.map(m=>{const[y,mo]=m.split('-');return new Date(+y,+mo-1,1).toLocaleDateString('en-US',{month:'short',year:'2-digit'});});
+  const mode=(document.getElementById('trends-mode')||{value:'bucket'}).value;
+  let datasets;
+  if(mode==='bucket'){
+    datasets=['joint','hapi','medical','special'].map(b=>({
+      label:BUCKET_META[b].label,
+      data:months.map(m=>+(byMonth[m].byBucket[b]||0).toFixed(2)),
+      backgroundColor:BUCKET_META[b].color
+    }));
+  }else{
+    const catTotals={};
+    months.forEach(m=>Object.entries(byMonth[m].byCat).forEach(([c,v])=>{catTotals[c]=(catTotals[c]||0)+v;}));
+    const topCats=Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([c])=>c);
+    datasets=topCats.map(c=>({
+      label:c,
+      data:months.map(m=>+(byMonth[m].byCat[c]||0).toFixed(2)),
+      backgroundColor:CAT_COLORS[c]||'#888'
+    }));
+  }
+  trendsChart=new Chart(canvas.getContext('2d'),{
+    type:'bar',
+    data:{labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      scales:{x:{stacked:true,ticks:{font:{size:10}}},y:{stacked:true,beginAtZero:true,ticks:{font:{size:10},callback:v=>'$'+v}}},
+      plugins:{legend:{position:'bottom',labels:{boxWidth:9,boxHeight:9,font:{size:10},padding:6}},
+        tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: $${ctx.raw.toFixed(2)}`}}}
+    }
+  });
+}
+// ── RECURRING / BILL DETECTION ────────────────────────────────────
+function detectRecurring(){
+  // Group spending (positive only) by normalized description prefix
+  const groups={};
+  allTransactions.forEach(t=>{
+    if(!t.dateObj||isNaN(t.dateObj)||t.amount<=0)return;
+    const key=(t.description||'').replace(/\d+/g,'').replace(/[^a-zA-Z\s]/g,' ').toLowerCase().trim().slice(0,40);
+    if(!key)return;
+    (groups[key]=groups[key]||[]).push(t);
+  });
+  const out=[];
+  Object.entries(groups).forEach(([key,txns])=>{
+    if(txns.length<3)return;
+    const months=new Set(txns.map(t=>`${t.dateObj.getFullYear()}-${t.dateObj.getMonth()}`));
+    if(months.size<3)return;
+    const amts=txns.map(t=>t.amount).sort((a,b)=>a-b);
+    const median=amts[Math.floor(amts.length/2)];
+    const tight=amts.filter(a=>Math.abs(a-median)/median<0.20);
+    if(tight.length<3)return; // need ≥3 amounts within ±20% of median
+    const days=txns.map(t=>t.dateObj.getDate()).sort((a,b)=>a-b);
+    const typicalDay=days[Math.floor(days.length/2)];
+    const recent=txns.slice().sort((a,b)=>b.dateObj-a.dateObj)[0];
+    out.push({key,name:recent.description,day:typicalDay,amount:median,count:txns.length,months:months.size,category:recent.category});
+  });
+  return out.sort((a,b)=>a.day-b.day);
+}
+function renderRecurring(){
+  const body=document.getElementById('recurring-body');if(!body)return;
+  const items=detectRecurring();
+  const totalEl=document.getElementById('recurring-total');
+  if(!items.length){
+    body.innerHTML=`<tr><td colspan="4"><div class="recurring-empty">No recurring bills detected yet — we need a description that appears in 3+ different months with similar amounts.</div></td></tr>`;
+    totalEl.textContent='0.00';return;
+  }
+  // Mark whether each recurring item appears in the currently-selected month
+  let monthTxns=[];
+  if(selectedMonth){const[y,mo]=selectedMonth.split('-');monthTxns=allTransactions.filter(t=>t.dateObj&&t.dateObj.getFullYear()===+y&&t.dateObj.getMonth()+1===+mo);}
+  body.innerHTML=items.map(r=>{
+    const paid=monthTxns.some(t=>{
+      const k=(t.description||'').replace(/\d+/g,'').replace(/[^a-zA-Z\s]/g,' ').toLowerCase().trim().slice(0,40);
+      return k===r.key;
+    });
+    return `<tr title="${r.name} · seen ${r.count}× across ${r.months} months">
+      <td style="font-size:11px;color:var(--muted);width:42px;white-space:nowrap">Day ${r.day}</td>
+      <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${CAT_COLORS[r.category]||'#888'};margin-right:5px;vertical-align:middle"></span>${r.name}</td>
+      <td style="text-align:right;font-weight:500;font-variant-numeric:tabular-nums">$${r.amount.toFixed(2)}</td>
+      <td style="text-align:center;width:24px">${paid?'<span title="Already in this month" style="color:var(--green);font-size:13px">✓</span>':'<span title="Not yet this month" style="color:var(--muted);font-size:11px">—</span>'}</td>
+    </tr>`;
+  }).join('');
+  totalEl.textContent=items.reduce((s,r)=>s+r.amount,0).toFixed(2);
 }
 // Jump to the Transactions tab filtered to one category (used by dashboard click-through)
 function filterByCategory(cat){
@@ -1349,7 +1506,22 @@ function switchTab(tab){
   if(tab==='settings')renderSettings();
   if(tab==='export'&&filteredTransactions.length)renderExportSummary();
 }
-function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
+function showToast(msg,opts){
+  const t=document.getElementById('toast');
+  if(opts&&opts.action){
+    t.innerHTML='';
+    const span=document.createElement('span');span.textContent=msg;t.appendChild(span);
+    const btn=document.createElement('button');
+    btn.textContent=opts.action.label;btn.className='toast-action';
+    btn.onclick=(e)=>{e.stopPropagation();opts.action.handler();t.classList.remove('show');};
+    t.appendChild(btn);
+  }else{
+    t.textContent=msg;
+  }
+  t.classList.add('show');
+  clearTimeout(t._h);
+  t._h=setTimeout(()=>t.classList.remove('show'),(opts&&opts.duration)||3000);
+}
 
 // ── CLOUD SYNC (Firebase) ─────────────────────────────────────────
 // Paste your Firebase web-app config below to enable cross-device sync.
