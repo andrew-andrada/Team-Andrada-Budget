@@ -200,6 +200,85 @@ tr.row-selected td{background:var(--green-light)!important;}
 /* TOAST ACTION */
 .toast-action{margin-left:12px;background:none;border:none;color:#f4c542;font-weight:600;cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:0;font-family:inherit;}
 .toast-action:hover{text-decoration:underline;}
+/* TEXT-SIZE PICKER */
+.size-sel{font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-family:inherit;color:var(--text);cursor:pointer;}
+.size-sel:hover{background:var(--bg);}
+/* TEXT SIZE — LARGE (1.2×) */
+body.text-lg{font-size:15px;}
+body.text-lg .sum-val{font-size:28px;}
+body.text-lg .sum-label{font-size:12px;}
+body.text-lg .sum-sub{font-size:13px;}
+body.text-lg .income-inp{font-size:32px;}
+body.text-lg .bk-amount{font-size:32px;}
+body.text-lg .bk-label{font-size:12px;}
+body.text-lg .bk-count{font-size:13px;}
+body.text-lg .section-title{font-size:26px;}
+body.text-lg .section-sub{font-size:13px;}
+body.text-lg .logo{font-size:28px;}
+body.text-lg .tab{font-size:15px;}
+body.text-lg .month-pill{font-size:13px;}
+body.text-lg .chart-title{font-size:16px;}
+body.text-lg .filter-sel,body.text-lg .search-inp{font-size:14px;}
+body.text-lg table th{font-size:12px;}
+body.text-lg table td{font-size:14px;}
+body.text-lg .cat-inline-sel,body.text-lg .amt-inp,body.text-lg .card-inline-inp,body.text-lg .card-name-inp{font-size:14px;}
+body.text-lg .bb{font-size:13px;}
+body.text-lg .cat-table{font-size:14px;}
+body.text-lg .budget-row,body.text-lg .budget-row .bv{font-size:14px;}
+body.text-lg .notes-edit{font-size:14px;}
+body.text-lg .nt-btn{font-size:13px;}
+body.text-lg .recurring-empty{font-size:13px;}
+body.text-lg .toast{font-size:14px;}
+body.text-lg .toast-action{font-size:13px;}
+body.text-lg .modal-title{font-size:24px;}
+body.text-lg .modal .form-row label{font-size:13px;}
+body.text-lg .modal .form-row input,body.text-lg .modal .form-row select{font-size:14px;}
+body.text-lg .bulk-bar{font-size:14px;}
+body.text-lg .btn,body.text-lg .btn-sm,body.text-lg .btn-primary,body.text-lg .add-btn{font-size:14px;}
+body.text-lg .settings-title{font-size:16px;}
+body.text-lg .settings-desc{font-size:13px;}
+body.text-lg .rule-row .rule-inp,body.text-lg .rule-row .rule-sel{font-size:14px;}
+body.text-lg .auth-email{font-size:13px;}
+body.text-lg .sync-status{font-size:12px;}
+body.text-lg .size-sel{font-size:13px;}
+/* TEXT SIZE — EXTRA LARGE (1.4×) */
+body.text-xl{font-size:17px;}
+body.text-xl .sum-val{font-size:32px;}
+body.text-xl .sum-label{font-size:14px;}
+body.text-xl .sum-sub{font-size:14px;}
+body.text-xl .income-inp{font-size:38px;}
+body.text-xl .bk-amount{font-size:38px;}
+body.text-xl .bk-label{font-size:14px;}
+body.text-xl .bk-count{font-size:14px;}
+body.text-xl .section-title{font-size:30px;}
+body.text-xl .section-sub{font-size:14px;}
+body.text-xl .logo{font-size:32px;}
+body.text-xl .tab{font-size:17px;}
+body.text-xl .month-pill{font-size:15px;}
+body.text-xl .chart-title{font-size:18px;}
+body.text-xl .filter-sel,body.text-xl .search-inp{font-size:16px;}
+body.text-xl table th{font-size:14px;}
+body.text-xl table td{font-size:16px;}
+body.text-xl .cat-inline-sel,body.text-xl .amt-inp,body.text-xl .card-inline-inp,body.text-xl .card-name-inp{font-size:16px;}
+body.text-xl .bb{font-size:14px;}
+body.text-xl .cat-table{font-size:16px;}
+body.text-xl .budget-row,body.text-xl .budget-row .bv{font-size:16px;}
+body.text-xl .notes-edit{font-size:16px;}
+body.text-xl .nt-btn{font-size:15px;}
+body.text-xl .recurring-empty{font-size:14px;}
+body.text-xl .toast{font-size:16px;}
+body.text-xl .toast-action{font-size:14px;}
+body.text-xl .modal-title{font-size:28px;}
+body.text-xl .modal .form-row label{font-size:14px;}
+body.text-xl .modal .form-row input,body.text-xl .modal .form-row select{font-size:16px;}
+body.text-xl .bulk-bar{font-size:16px;}
+body.text-xl .btn,body.text-xl .btn-sm,body.text-xl .btn-primary,body.text-xl .add-btn{font-size:16px;}
+body.text-xl .settings-title{font-size:18px;}
+body.text-xl .settings-desc{font-size:14px;}
+body.text-xl .rule-row .rule-inp,body.text-xl .rule-row .rule-sel{font-size:16px;}
+body.text-xl .auth-email{font-size:14px;}
+body.text-xl .sync-status{font-size:13px;}
+body.text-xl .size-sel{font-size:15px;}
 @media(max-width:760px){
   .dash-trends{grid-template-columns:1fr;}
   .header-right{gap:8px;}
@@ -224,6 +303,11 @@ tr.row-selected td{background:var(--green-light)!important;}
       <button class="tab" onclick="switchTab('settings')">Settings</button>
       <button class="tab" onclick="switchTab('export')">Export</button>
     </div>
+    <select class="size-sel" id="text-size-sel" onchange="setTextSize(this.value)" title="Adjust text size">
+      <option value="md">Aa</option>
+      <option value="lg">Aa+</option>
+      <option value="xl">Aa++</option>
+    </select>
     <div id="auth-area" class="auth-area"></div>
   </div>
 </header>
@@ -1584,6 +1668,26 @@ function showToast(msg,opts){
   clearTimeout(t._h);
   t._h=setTimeout(()=>t.classList.remove('show'),(opts&&opts.duration)||3000);
 }
+// ── TEXT SIZE ─────────────────────────────────────────────────────
+function setTextSize(size){
+  size=['md','lg','xl'].includes(size)?size:'md';
+  settings.textSize=size;
+  saveSettings();
+  applyTextSize(size);
+  showToast(`✓ Text size: ${ {md:'Normal',lg:'Large','xl':'Extra Large'}[size] }`);
+}
+function applyTextSize(size){
+  size=['md','lg','xl'].includes(size)?size:'md';
+  document.body.classList.remove('text-md','text-lg','text-xl');
+  document.body.classList.add('text-'+size);
+  const sel=document.getElementById('text-size-sel');if(sel)sel.value=size;
+  // Scale Chart.js default font so chart labels/legends grow too
+  if(typeof Chart!=='undefined'){
+    Chart.defaults.font.size={md:11,lg:13,xl:15}[size];
+  }
+  // Re-render any visible charts so new font sizes take effect (skip during cloud snapshot — caller will rebuild)
+  if(!applyingRemote && allTransactions.length)renderDashboard();
+}
 
 // ── CLOUD SYNC (Firebase) ─────────────────────────────────────────
 // Paste your Firebase web-app config below to enable cross-device sync.
@@ -1658,6 +1762,7 @@ function handleCloudSnapshot(snap){
   applyingRemote=true;
   if(data.settings)settings=mergeSettings(data.settings);
   if(Array.isArray(data.transactions))allTransactions=fromCloudTxns(data.transactions);
+  applyTextSize(settings.textSize||'md');
   saveSettings();saveTransactions();
   rebuildMonths(settings.lastMonth);
   if(document.getElementById('page-settings').classList.contains('active'))renderSettings();
@@ -1692,6 +1797,7 @@ function updateAuthUI(){
 
 // ── INIT: restore saved data on load ──────────────────────────────
 (function init(){
+  applyTextSize(settings.textSize||'md');
   if(settings.income!=null&&!isNaN(settings.income))document.getElementById('income-inp').value=settings.income;
   loadTransactions();
   updateCardDatalist();
