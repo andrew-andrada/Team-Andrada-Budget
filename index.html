@@ -50,7 +50,7 @@ main{padding:22px 28px;max-width:1160px;margin:0 auto;}
 .btn-sm{padding:4px 10px;font-size:11px;}
 /* SUMMARY BAR */
 .summary-bar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 22px;margin-bottom:14px;}
-.summary-row{display:grid;grid-template-columns:repeat(5,1fr);}
+.summary-row{display:grid;grid-template-columns:repeat(6,1fr);}
 .sum-cell{padding:0 16px;border-right:1px solid var(--border);}
 .sum-cell:first-child{padding-left:0;}
 .sum-cell:last-child{border-right:none;padding-right:0;}
@@ -163,6 +163,32 @@ tr:hover td{background:#faf9f6;}
 .sync-status{font-size:10px;font-weight:600;color:var(--green);background:var(--green-light);padding:2px 8px;border-radius:20px;white-space:nowrap;}
 .sync-status.saving{color:var(--amber);background:var(--amber-light);}
 .sync-status.error{color:var(--red);background:var(--red-light);}
+/* BULK BAR */
+.bulk-bar{padding:9px 14px;display:flex;align-items:center;gap:8px;background:var(--green-light);border-bottom:1px solid var(--border);flex-wrap:wrap;font-size:12px;}
+.row-check{cursor:pointer;width:14px;height:14px;}
+.checkbox-cell{width:32px;text-align:center;padding-left:10px!important;padding-right:4px!important;}
+tr.row-selected td{background:var(--green-light)!important;}
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:rgba(26,25,23,.45);display:flex;align-items:center;justify-content:center;z-index:600;}
+.modal{background:var(--surface);border-radius:var(--radius-lg);padding:22px 26px;width:min(440px,92vw);box-shadow:0 14px 44px rgba(0,0,0,.22);}
+.modal-title{font-family:'DM Serif Display',serif;font-size:20px;margin-bottom:14px;}
+.form-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.form-row label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;width:88px;flex-shrink:0;}
+.form-row input,.form-row select{flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;font-family:inherit;background:var(--bg);outline:none;}
+.form-row input:focus,.form-row select:focus{border-color:var(--green);background:#fff;}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
+/* NOTES */
+.notes-card{margin-bottom:14px;}
+.notes-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap;}
+.notes-toolbar{display:flex;gap:4px;}
+.nt-btn{padding:3px 8px;border:1px solid var(--border);background:var(--surface);border-radius:6px;font-family:inherit;font-size:11px;cursor:pointer;color:var(--text);}
+.nt-btn:hover{background:var(--surface2);}
+.notes-edit{min-height:80px;border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:12px;line-height:1.6;outline:none;background:var(--bg);}
+.notes-edit:focus{border-color:var(--green);background:#fff;}
+.notes-edit:empty:before{content:attr(data-placeholder);color:var(--muted);}
+.notes-edit ul{padding-left:18px;margin:4px 0;}
+.notes-edit ol{padding-left:18px;margin:4px 0;}
+.notes-edit p{margin:4px 0;}
 @media(max-width:760px){
   .header-right{gap:8px;}
   .auth-email{display:none;}
@@ -225,7 +251,7 @@ tr:hover td{background:#faf9f6;}
       <div class="sum-cell">
         <div class="sum-label">Balance</div>
         <div class="sum-val" id="s-balance" style="color:var(--green)">—</div>
-        <div class="sum-sub">income minus spending</div>
+        <div class="sum-sub">income − spent + exclusions</div>
       </div>
       <div class="sum-cell">
         <div class="sum-label">Income</div>
@@ -234,6 +260,11 @@ tr:hover td{background:#faf9f6;}
           <input class="income-inp" id="income-inp" type="number" value="2400" oninput="settings.income=parseFloat(this.value)||0;saveSettings();updateSummary()">
         </div>
         <div class="sum-sub">click to edit</div>
+      </div>
+      <div class="sum-cell">
+        <div class="sum-label">Exclusions</div>
+        <div class="sum-val" id="s-exclusions" style="color:var(--amber)">—</div>
+        <div class="sum-sub">hapi + medical + special</div>
       </div>
       <div class="sum-cell">
         <div class="sum-label">Total Spent</div>
@@ -313,6 +344,22 @@ tr:hover td{background:#faf9f6;}
       </div>
     </div>
   </div>
+  <!-- Per-month notes -->
+  <div class="chart-card notes-card">
+    <div class="notes-header">
+      <div class="chart-title" style="margin-bottom:0">Notes for this month</div>
+      <div class="notes-toolbar">
+        <button class="nt-btn" onmousedown="event.preventDefault();noteFmt('bold')" title="Bold"><b>B</b></button>
+        <button class="nt-btn" onmousedown="event.preventDefault();noteFmt('italic')" title="Italic"><i>I</i></button>
+        <button class="nt-btn" onmousedown="event.preventDefault();noteFmt('underline')" title="Underline"><u>U</u></button>
+        <button class="nt-btn" onmousedown="event.preventDefault();noteFmt('strikeThrough')" title="Strikethrough"><s>S</s></button>
+        <button class="nt-btn" onmousedown="event.preventDefault();noteFmt('insertUnorderedList')" title="Bullet list">• List</button>
+        <button class="nt-btn" onmousedown="event.preventDefault();noteFmt('insertOrderedList')" title="Numbered list">1. List</button>
+        <button class="nt-btn" onmousedown="event.preventDefault();noteFmt('removeFormat')" title="Clear formatting">⟲</button>
+      </div>
+    </div>
+    <div id="notes-edit" class="notes-edit" contenteditable="true" data-placeholder="Notes for this month — bullets, strikethrough, etc." oninput="saveNote()" onblur="saveNote()"></div>
+  </div>
 </div>
 
 <!-- TRANSACTIONS -->
@@ -322,6 +369,7 @@ tr:hover td{background:#faf9f6;}
       <div class="section-title">Transactions</div>
       <div class="section-sub" id="txn-count-label">No transactions loaded</div>
     </div>
+    <button class="btn btn-primary" onclick="openAddTxn()">+ Add transaction</button>
   </div>
   <div class="table-card">
     <div class="table-toolbar">
@@ -343,9 +391,26 @@ tr:hover td{background:#faf9f6;}
         <option value="amount-asc">Amount ↑</option>
       </select>
     </div>
+    <div id="bulk-bar" class="bulk-bar" style="display:none">
+      <span><strong id="bulk-count">0</strong> selected</span>
+      <select class="filter-sel" id="bulk-cat-sel" onchange="bulkSetCategory(this.value);this.value=''">
+        <option value="">Set category to…</option>
+      </select>
+      <select class="filter-sel" id="bulk-bucket-sel" onchange="bulkSetBucket(this.value);this.value=''">
+        <option value="">Set bucket to…</option>
+        <option value="joint">Joint</option>
+        <option value="hapi">Hapi</option>
+        <option value="medical">Medical</option>
+        <option value="special">Special Occasion</option>
+        <option value="none">Unassigned</option>
+      </select>
+      <button class="btn btn-sm" onclick="bulkDelete()" style="color:var(--red);border-color:var(--red)">Delete</button>
+      <button class="btn btn-sm" onclick="clearSelection()">Clear</button>
+    </div>
     <div style="overflow-x:auto">
       <table>
         <thead><tr>
+          <th class="checkbox-cell"><input type="checkbox" id="select-all-check" class="row-check" onchange="selectAllVisible(this.checked)" title="Select all visible"></th>
           <th>Date</th><th>Description</th><th>Category</th><th>Card</th><th>Bucket</th><th style="text-align:right">Amount</th><th></th>
         </tr></thead>
         <tbody id="txn-body"></tbody>
@@ -438,6 +503,29 @@ tr:hover td{background:#faf9f6;}
 
 <!-- Shared card-name suggestions -->
 <datalist id="card-names"></datalist>
+
+<!-- Manual transaction entry modal -->
+<div id="add-txn-modal" class="modal-bg" style="display:none" onclick="if(event.target===this)closeAddTxn()">
+  <div class="modal">
+    <div class="modal-title">Add transaction</div>
+    <div class="form-row"><label>Date</label><input type="date" id="at-date"></div>
+    <div class="form-row"><label>Description</label><input type="text" id="at-desc" placeholder="e.g., Venmo · babysitter"></div>
+    <div class="form-row"><label>Amount</label><input type="number" step="0.01" id="at-amount" placeholder="positive = spending"></div>
+    <div class="form-row"><label>Category</label><select id="at-cat"></select></div>
+    <div class="form-row"><label>Bucket</label><select id="at-bucket">
+      <option value="joint">Joint</option>
+      <option value="hapi">Hapi</option>
+      <option value="medical">Medical</option>
+      <option value="special">Special Occasion</option>
+      <option value="none">Unassigned</option>
+    </select></div>
+    <div class="form-row"><label>Source</label><input type="text" id="at-card" value="Manual" list="card-names"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeAddTxn()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddTxn()">Add transaction</button>
+    </div>
+  </div>
+</div>
 
 <div class="toast" id="toast"></div>
 
@@ -589,6 +677,7 @@ function txnSig(t){
 // ── STATE ─────────────────────────────────────────────────────────
 let rawFiles=[],allTransactions=[],filteredTransactions=[],selectedMonth=null,fileCards={};
 let catChart,cardChart,dailyChart,activeBadgeIdx=null;
+let selectedTxns=new Set(); // signatures of bulk-selected transactions
 
 // ── CSV PARSER ────────────────────────────────────────────────────
 function parseCSV(text){
@@ -755,7 +844,27 @@ function selectMonth(month){
   filteredTransactions=allTransactions.filter(t=>{const d=t.dateObj;return d.getFullYear()===+y&&d.getMonth()+1===+mo;});
   document.getElementById('cat-filter').innerHTML='<option value="">All categories</option>';
   document.getElementById('card-filter').innerHTML='<option value="">All cards</option>';
+  clearSelection(); // clear bulk selection when switching months
+  loadNoteForMonth();
   renderDashboard();renderTable();
+}
+// ── NOTES (per month) ────────────────────────────────────────────
+function loadNoteForMonth(){
+  const el=document.getElementById('notes-edit');if(!el||!selectedMonth)return;
+  el.innerHTML=(settings.notes&&settings.notes[selectedMonth])||'';
+}
+function saveNote(){
+  if(!selectedMonth)return;
+  const el=document.getElementById('notes-edit');if(!el)return;
+  settings.notes=settings.notes||{};
+  settings.notes[selectedMonth]=el.innerHTML;
+  saveSettings(); // also pushes to cloud via the existing pipeline
+}
+function noteFmt(cmd){
+  const el=document.getElementById('notes-edit');if(!el)return;
+  el.focus();
+  document.execCommand(cmd,false,null);
+  saveNote();
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
@@ -763,20 +872,27 @@ function renderDashboard(){updateSummary();renderBuckets();renderCharts();render
 
 function updateSummary(){
   const income=parseFloat(document.getElementById('income-inp').value)||0;
-  const netSpend=filteredTransactions.reduce((s,t)=>s+t.amount,0);
-  const balance=income-netSpend;
+  // All amounts use NET (charges minus refunds) so the math is consistent across cells.
+  const bucketSum=b=>filteredTransactions.filter(t=>t.bucket===b).reduce((s,t)=>s+t.amount,0);
+  const jointAmt=bucketSum('joint');
+  const hapiAmt=bucketSum('hapi');
+  const medAmt=bucketSum('medical');
+  const specAmt=bucketSum('special');
+  const exclusions=hapiAmt+medAmt+specAmt;
+  const totalSpent=filteredTransactions.reduce((s,t)=>s+t.amount,0);
+  const balance=income-totalSpent+exclusions;
   const[y,mo]=(selectedMonth||'2025-01').split('-');
   const daysInMonth=new Date(+y,+mo,0).getDate();
-  const fmt=v=>`${v<0?'+':v>0?'-':''}$${Math.abs(v).toFixed(2)}`;
   const fmtBalance=v=>`${v<0?'-':''}$${Math.abs(v).toFixed(2)}`;
 
   const sbal=document.getElementById('s-balance');
   sbal.textContent=fmtBalance(balance);
   sbal.style.color=balance>=0?'var(--green)':'var(--red)';
-  document.getElementById('s-total').textContent=`$${Math.abs(netSpend).toFixed(2)}`;
-  document.getElementById('s-txn-count').textContent=`${filteredTransactions.length} transactions`;
+  document.getElementById('s-exclusions').textContent=`$${Math.abs(exclusions).toFixed(2)}`;
+  document.getElementById('s-total').textContent=`$${Math.abs(totalSpent).toFixed(2)}`;
+  document.getElementById('s-txn-count').textContent=`${filteredTransactions.length} transaction${filteredTransactions.length!==1?'s':''}`;
   document.getElementById('s-days').textContent=daysInMonth;
-  document.getElementById('s-daily-avg').textContent=`$${(netSpend/daysInMonth).toFixed(2)}/day`;
+  document.getElementById('s-daily-avg').textContent=`$${(totalSpent/daysInMonth).toFixed(2)}/day`;
 
   const charges=filteredTransactions.filter(t=>t.amount>0);
   const largest=charges.length?charges.reduce((mx,t)=>t.amount>mx.amount?t:mx):null;
@@ -784,10 +900,6 @@ function updateSummary(){
   document.getElementById('s-largest-desc').textContent=largest?(largest.description||'').slice(0,22):'';
 
   document.getElementById('bud-income').textContent=`$${income.toLocaleString()}`;
-  const jointAmt=filteredTransactions.filter(t=>t.bucket==='joint'&&t.amount>0).reduce((s,t)=>s+t.amount,0);
-  const medAmt=filteredTransactions.filter(t=>t.bucket==='medical'&&t.amount>0).reduce((s,t)=>s+t.amount,0);
-  const hapiAmt=filteredTransactions.filter(t=>t.bucket==='hapi'&&t.amount>0).reduce((s,t)=>s+t.amount,0);
-  const specAmt=filteredTransactions.filter(t=>(t.bucket==='special'||t.category==='Travel')&&t.amount>0).reduce((s,t)=>s+t.amount,0);
   const budSpecial=1000,budMedical=250,budHapi=500;
   const setRow=(id,amt,budget)=>{
     const el=document.getElementById(id);
@@ -804,14 +916,17 @@ function updateSummary(){
 }
 
 function renderBuckets(){
+  // Net (charges minus refunds) sums per bucket, matching the budget summary math.
   const tots={joint:0,hapi:0,medical:0,special:0};
   const cnts={joint:0,hapi:0,medical:0,special:0};
-  filteredTransactions.forEach(t=>{const b=t.bucket;if(b&&b!=='none'){tots[b]=(tots[b]||0)+t.amount;cnts[b]=(cnts[b]||0)+1;}});
+  filteredTransactions.forEach(t=>{
+    const b=t.bucket;
+    if(b&&b!=='none'&&tots[b]!==undefined){tots[b]+=t.amount;cnts[b]+=1;}
+  });
   ['joint','hapi','medical','special'].forEach(b=>{
-    const v=tots[b]||0;
-    document.getElementById(`b-${b}`).textContent=`${v<0?'+':v<0?'':'-'}$${Math.abs(v).toFixed(2)}`.replace('--','');
-    document.getElementById(`b-${b}`).textContent=`$${Math.abs(v).toFixed(2)}`;
-    document.getElementById(`bc-${b}`).textContent=`${cnts[b]||0} transaction${cnts[b]!==1?'s':''}`;
+    const v=tots[b];
+    document.getElementById(`b-${b}`).textContent=`${v<0?'-':''}$${Math.abs(v).toFixed(2)}`;
+    document.getElementById(`bc-${b}`).textContent=`${cnts[b]} transaction${cnts[b]!==1?'s':''}`;
   });
 }
 
@@ -885,14 +1000,24 @@ function renderTable(){
   if(sort==='amount-desc')data.sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));
   if(sort==='amount-asc')data.sort((a,b)=>Math.abs(a.amount)-Math.abs(b.amount));
   document.getElementById('txn-count-label').textContent=`${data.length} of ${filteredTransactions.length} transactions`;
+  // Refresh the bulk-bar category dropdown to match current categories
+  const bcs=document.getElementById('bulk-cat-sel');
+  if(bcs){
+    const cur=bcs.value;
+    bcs.innerHTML='<option value="">Set category to…</option>'+settings.categories.map(c=>`<option value="${c}">${c}</option>`).join('');
+    bcs.value=cur;
+  }
   const body=document.getElementById('txn-body');
-  if(!data.length){body.innerHTML='<tr><td colspan="7" style="text-align:center;padding:26px;color:var(--muted)">No transactions match filters</td></tr>';return;}
+  if(!data.length){body.innerHTML='<tr><td colspan="8" style="text-align:center;padding:26px;color:var(--muted)">No transactions match filters</td></tr>';updateBulkBar();return;}
   body.innerHTML=data.map(t=>{
     const gi=filteredTransactions.indexOf(t);
+    const sig=txnSig(t);const checked=selectedTxns.has(sig);
     const d=t.dateObj;const ds=`${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
     const cc=CAT_COLORS[t.category]||'#888';const bm=BUCKET_META[t.bucket||'none'];const isNeg=t.amount<0;
     const catOptions=settings.categories.map(c=>`<option value="${c}" ${c===t.category?'selected':''}>${c}</option>`).join('');
-    return`<tr>
+    const safeSig=sig.replace(/"/g,'&quot;');
+    return`<tr class="${checked?'row-selected':''}">
+      <td class="checkbox-cell"><input type="checkbox" class="row-check" data-sig="${safeSig}" ${checked?'checked':''} onchange="toggleSelect(this.dataset.sig,this.checked,this.closest('tr'))"></td>
       <td style="color:var(--muted);font-size:11px;white-space:nowrap">${ds}</td>
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.description}">${t.description}</td>
       <td><select class="cat-inline-sel" style="background:${cc}18;color:${cc};border-color:${cc}44;" onchange="updateCategory(${gi},this.value)">${catOptions}</select></td>
@@ -902,6 +1027,7 @@ function renderTable(){
       <td><button onclick="deleteTransaction(${gi})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;padding:2px 5px;border-radius:4px;line-height:1;" title="Remove transaction">×</button></td>
     </tr>`;
   }).join('');
+  updateBulkBar();
 }
 
 // ── BUCKET MENU ───────────────────────────────────────────────────
@@ -917,7 +1043,7 @@ function assignBucket(bucket){
   filteredTransactions[activeBadgeIdx].bucket=bucket;
   saveTransactions();
   document.getElementById('bk-menu').style.display='none';activeBadgeIdx=null;
-  renderTable();renderBuckets();updateSummary();
+  renderTable();renderDashboard();
   showToast('✓ Bucket updated');
 }
 function updateCategory(idx,newCat){
@@ -952,6 +1078,106 @@ function updateAmount(idx,val){
   saveTransactions();
   renderTable();renderDashboard();
   showToast('✓ Amount updated');
+}
+// ── BULK EDIT ─────────────────────────────────────────────────────
+function toggleSelect(sig,checked,tr){
+  if(checked)selectedTxns.add(sig);else selectedTxns.delete(sig);
+  if(tr)tr.classList.toggle('row-selected',checked);
+  updateBulkBar();
+}
+function selectAllVisible(checked){
+  document.querySelectorAll('.row-check[data-sig]').forEach(c=>{
+    c.checked=checked;
+    const sig=c.dataset.sig;
+    if(checked)selectedTxns.add(sig);else selectedTxns.delete(sig);
+    const tr=c.closest('tr');if(tr)tr.classList.toggle('row-selected',checked);
+  });
+  updateBulkBar();
+}
+function clearSelection(){
+  selectedTxns.clear();
+  document.querySelectorAll('.row-check').forEach(c=>c.checked=false);
+  document.querySelectorAll('tr.row-selected').forEach(tr=>tr.classList.remove('row-selected'));
+  updateBulkBar();
+}
+function updateBulkBar(){
+  const bar=document.getElementById('bulk-bar');if(!bar)return;
+  bar.style.display=selectedTxns.size>0?'flex':'none';
+  const c=document.getElementById('bulk-count');if(c)c.textContent=selectedTxns.size;
+}
+function bulkSetCategory(cat){
+  if(!cat||!selectedTxns.size)return;
+  let n=0;
+  allTransactions.forEach(t=>{
+    if(selectedTxns.has(txnSig(t))){
+      t.category=cat;
+      t.bucket=settings.bucketDefaults[cat]||t.bucket||'none';
+      if(t.description)settings.corrections[t.description]=cat;
+      n++;
+    }
+  });
+  saveSettings();saveTransactions();
+  clearSelection();renderTable();renderDashboard();
+  showToast(`✓ ${n} transaction${n!==1?'s':''} → ${cat}`);
+}
+function bulkSetBucket(b){
+  if(!b||!selectedTxns.size)return;
+  let n=0;
+  allTransactions.forEach(t=>{
+    if(selectedTxns.has(txnSig(t))){t.bucket=b;n++;}
+  });
+  saveTransactions();
+  clearSelection();renderTable();renderDashboard();
+  showToast(`✓ ${n} transaction${n!==1?'s':''} → ${BUCKET_META[b].label} bucket`);
+}
+function bulkDelete(){
+  const n=selectedTxns.size;if(!n)return;
+  if(!confirm(`Delete ${n} selected transaction${n!==1?'s':''}? This cannot be undone.`))return;
+  allTransactions=allTransactions.filter(t=>!selectedTxns.has(txnSig(t)));
+  filteredTransactions=filteredTransactions.filter(t=>!selectedTxns.has(txnSig(t)));
+  saveTransactions();
+  clearSelection();renderTable();renderDashboard();
+  showToast(`✓ Removed ${n} transaction${n!==1?'s':''}`);
+}
+// ── MANUAL TRANSACTION ENTRY ──────────────────────────────────────
+function openAddTxn(){
+  const modal=document.getElementById('add-txn-modal');if(!modal)return;
+  // Populate category select fresh from settings.categories
+  const catSel=document.getElementById('at-cat');
+  catSel.innerHTML=settings.categories.map(c=>`<option value="${c}">${c}</option>`).join('');
+  // Default date: today, or 1st of selected month if no current month
+  const now=new Date();
+  let defaultDate=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  if(selectedMonth){const[y,mo]=selectedMonth.split('-');if(now.getFullYear()!=+y||now.getMonth()+1!=+mo)defaultDate=`${y}-${mo}-01`;}
+  document.getElementById('at-date').value=defaultDate;
+  document.getElementById('at-desc').value='';
+  document.getElementById('at-amount').value='';
+  document.getElementById('at-card').value='Manual';
+  // Sync bucket default to currently-selected category
+  catSel.onchange=()=>{document.getElementById('at-bucket').value=settings.bucketDefaults[catSel.value]||'none';};
+  catSel.onchange();
+  modal.style.display='flex';
+  setTimeout(()=>document.getElementById('at-desc').focus(),50);
+}
+function closeAddTxn(){document.getElementById('add-txn-modal').style.display='none';}
+function submitAddTxn(){
+  const dateStr=document.getElementById('at-date').value;
+  const desc=document.getElementById('at-desc').value.trim();
+  const amt=parseFloat(document.getElementById('at-amount').value);
+  const cat=document.getElementById('at-cat').value;
+  const bucket=document.getElementById('at-bucket').value;
+  const card=(document.getElementById('at-card').value||'Manual').trim();
+  if(!dateStr){showToast('Date is required');return;}
+  if(!desc){showToast('Description is required');return;}
+  if(isNaN(amt)||amt===0){showToast('Amount must be a non-zero number');return;}
+  const dateObj=new Date(dateStr+'T00:00:00');
+  if(isNaN(dateObj)){showToast('Invalid date');return;}
+  const txn={date:dateStr,dateObj,description:desc,category:cat,amount:amt,card,bucket};
+  allTransactions.push(txn);
+  saveTransactions();
+  closeAddTxn();
+  rebuildMonths(`${dateObj.getFullYear()}-${String(dateObj.getMonth()+1).padStart(2,'0')}`);
+  showToast(`✓ Added: ${desc}`);
 }
 function updateCard(idx,val){
   const t=filteredTransactions[idx];if(!t)return;
