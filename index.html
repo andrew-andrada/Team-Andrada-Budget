@@ -489,6 +489,11 @@ tr.row-selected td{background:var(--green-light)!important;}
     <button class="add-btn" onclick="addExclusion()">+ Add exclusion</button>
   </div>
   <div class="settings-section">
+    <div class="settings-title">Hidden Recurring Bills</div>
+    <div class="settings-desc">Items you dismissed from the Recurring Bills card. Click × to make them eligible again.</div>
+    <div id="recurring-ignored-list"></div>
+  </div>
+  <div class="settings-section">
     <div class="settings-title">Stored Data</div>
     <div class="settings-desc" id="data-status">No transactions stored.</div>
     <button class="btn btn-sm" onclick="clearAllData()" style="color:var(--red);border-color:var(--red)">Clear all stored transactions</button>
@@ -1294,52 +1299,92 @@ function renderTrends(){
   });
 }
 // ── RECURRING / BILL DETECTION ────────────────────────────────────
+function recurringKey(desc){
+  // Normalize: drop digits and non-letters, collapse whitespace, lowercase
+  return (desc||'').replace(/\d+/g,'').replace(/[^a-zA-Z\s]/g,' ').replace(/\s+/g,' ').toLowerCase().trim().slice(0,40);
+}
 function detectRecurring(){
-  // Group spending (positive only) by normalized description prefix
+  const ignored=new Set((settings.recurringIgnored||[]).map(k=>String(k).toLowerCase()));
+  // Group spending (positive only) by normalized description
   const groups={};
   allTransactions.forEach(t=>{
     if(!t.dateObj||isNaN(t.dateObj)||t.amount<=0)return;
-    const key=(t.description||'').replace(/\d+/g,'').replace(/[^a-zA-Z\s]/g,' ').toLowerCase().trim().slice(0,40);
-    if(!key)return;
+    const key=recurringKey(t.description);
+    if(!key||ignored.has(key))return;
     (groups[key]=groups[key]||[]).push(t);
   });
   const out=[];
   Object.entries(groups).forEach(([key,txns])=>{
     if(txns.length<3)return;
-    const months=new Set(txns.map(t=>`${t.dateObj.getFullYear()}-${t.dateObj.getMonth()}`));
-    if(months.size<3)return;
+    // Median amount across all instances
     const amts=txns.map(t=>t.amount).sort((a,b)=>a-b);
     const median=amts[Math.floor(amts.length/2)];
-    const tight=amts.filter(a=>Math.abs(a-median)/median<0.20);
-    if(tight.length<3)return; // need ≥3 amounts within ±20% of median
-    const days=txns.map(t=>t.dateObj.getDate()).sort((a,b)=>a-b);
-    const typicalDay=days[Math.floor(days.length/2)];
+    if(median<=0)return;
+    // Bucket by month and check that each month has a single near-median charge.
+    // This filters out frequent merchants (Costco, Target, Lyft) where most
+    // months have many charges of varying amounts.
+    const byMonth={};
+    txns.forEach(t=>{const mk=`${t.dateObj.getFullYear()}-${t.dateObj.getMonth()}`;(byMonth[mk]=byMonth[mk]||[]).push(t);});
+    let qualifyingMonths=0,monthsWithMultiTight=0;const daysList=[];
+    Object.values(byMonth).forEach(ms=>{
+      const tight=ms.filter(t=>Math.abs(t.amount-median)/median<=0.05); // ±5% (was ±20%)
+      if(tight.length===0)return;
+      if(tight.length>1)monthsWithMultiTight++;
+      qualifyingMonths++;
+      daysList.push(tight[0].dateObj.getDate());
+    });
+    if(qualifyingMonths<3)return;        // need 3+ "subscription-shaped" months
+    if(monthsWithMultiTight>1)return;    // 2+ months with duplicates → frequent merchant, not a bill
+    // Day-of-month stability — a real bill doesn't move >7 days from its typical day
+    const sortedDays=daysList.slice().sort((a,b)=>a-b);
+    const medianDay=sortedDays[Math.floor(sortedDays.length/2)];
+    const dayVariance=Math.max(...sortedDays.map(d=>Math.abs(d-medianDay)));
+    if(dayVariance>7)return;
     const recent=txns.slice().sort((a,b)=>b.dateObj-a.dateObj)[0];
-    out.push({key,name:recent.description,day:typicalDay,amount:median,count:txns.length,months:months.size,category:recent.category});
+    out.push({key,name:recent.description,day:medianDay,amount:median,count:qualifyingMonths,months:qualifyingMonths,category:recent.category});
   });
   return out.sort((a,b)=>a.day-b.day);
+}
+function dismissRecurring(key){
+  if(!key)return;
+  settings.recurringIgnored=settings.recurringIgnored||[];
+  if(!settings.recurringIgnored.includes(key))settings.recurringIgnored.push(key);
+  saveSettings();
+  renderRecurring();
+  showToast('✓ Hidden from recurring bills',{duration:5000,action:{label:'Undo',handler:()=>{
+    settings.recurringIgnored=(settings.recurringIgnored||[]).filter(k=>k!==key);
+    saveSettings();renderRecurring();
+    if(document.getElementById('page-settings').classList.contains('active'))renderSettings();
+    showToast('↩ Restored');
+  }}});
+}
+function restoreRecurring(key){
+  settings.recurringIgnored=(settings.recurringIgnored||[]).filter(k=>k!==key);
+  saveSettings();
+  renderRecurring();
+  if(document.getElementById('page-settings').classList.contains('active'))renderSettings();
+  showToast('✓ Will show as recurring again');
 }
 function renderRecurring(){
   const body=document.getElementById('recurring-body');if(!body)return;
   const items=detectRecurring();
   const totalEl=document.getElementById('recurring-total');
   if(!items.length){
-    body.innerHTML=`<tr><td colspan="4"><div class="recurring-empty">No recurring bills detected yet — we need a description that appears in 3+ different months with similar amounts.</div></td></tr>`;
+    body.innerHTML=`<tr><td colspan="5"><div class="recurring-empty">No recurring bills detected yet — we look for descriptions repeating in 3+ months at similar amounts and days.</div></td></tr>`;
     totalEl.textContent='0.00';return;
   }
   // Mark whether each recurring item appears in the currently-selected month
   let monthTxns=[];
   if(selectedMonth){const[y,mo]=selectedMonth.split('-');monthTxns=allTransactions.filter(t=>t.dateObj&&t.dateObj.getFullYear()===+y&&t.dateObj.getMonth()+1===+mo);}
   body.innerHTML=items.map(r=>{
-    const paid=monthTxns.some(t=>{
-      const k=(t.description||'').replace(/\d+/g,'').replace(/[^a-zA-Z\s]/g,' ').toLowerCase().trim().slice(0,40);
-      return k===r.key;
-    });
-    return `<tr title="${r.name} · seen ${r.count}× across ${r.months} months">
+    const paid=monthTxns.some(t=>recurringKey(t.description)===r.key);
+    const safeKey=r.key.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    return `<tr title="${r.name} · seen across ${r.months} months">
       <td style="font-size:11px;color:var(--muted);width:42px;white-space:nowrap">Day ${r.day}</td>
       <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${CAT_COLORS[r.category]||'#888'};margin-right:5px;vertical-align:middle"></span>${r.name}</td>
       <td style="text-align:right;font-weight:500;font-variant-numeric:tabular-nums">$${r.amount.toFixed(2)}</td>
-      <td style="text-align:center;width:24px">${paid?'<span title="Already in this month" style="color:var(--green);font-size:13px">✓</span>':'<span title="Not yet this month" style="color:var(--muted);font-size:11px">—</span>'}</td>
+      <td style="text-align:center;width:20px">${paid?'<span title="Already in this month" style="color:var(--green);font-size:13px">✓</span>':'<span title="Not yet this month" style="color:var(--muted);font-size:11px">—</span>'}</td>
+      <td style="text-align:center;width:22px"><button onclick="dismissRecurring('${safeKey}')" title="Not a recurring bill — hide it" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;">×</button></td>
     </tr>`;
   }).join('');
   totalEl.textContent=items.reduce((s,r)=>s+r.amount,0).toFixed(2);
@@ -1472,6 +1517,23 @@ function renderSettings(){
   const dr=document.getElementById('desc-rules-list');dr.innerHTML='';settings.descRules.forEach((r,i)=>dr.appendChild(mkDescRow(r,i)));
   const cr=document.getElementById('cat-rules-list');cr.innerHTML='';settings.catRules.forEach((r,i)=>cr.appendChild(mkCatRow(r,i)));
   const er=document.getElementById('exclusions-list');er.innerHTML='';settings.exclusions.forEach((e,i)=>er.appendChild(mkExRow(e,i)));
+  // Hidden recurring bills
+  const ri=document.getElementById('recurring-ignored-list');
+  if(ri){
+    const list=(settings.recurringIgnored||[]);
+    if(!list.length){
+      ri.innerHTML='<p style="font-size:11px;color:var(--muted)">None hidden — click the × next to any item in the Recurring Bills card to hide it.</p>';
+    }else{
+      ri.innerHTML='';
+      list.forEach(k=>{
+        const safeKey=k.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+        const row=document.createElement('div');row.className='rule-row';
+        row.innerHTML=`<span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${k}">${k}</span>
+          <button class="remove-btn" onclick="restoreRecurring('${safeKey}')" title="Restore">×</button>`;
+        ri.appendChild(row);
+      });
+    }
+  }
   updateDataStatus();
 }
 function mkCatEditRow(c,i){
