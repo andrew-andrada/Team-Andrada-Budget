@@ -200,6 +200,16 @@ tr.row-selected td{background:var(--green-light)!important;}
 /* TOAST ACTION */
 .toast-action{margin-left:12px;background:none;border:none;color:#f4c542;font-weight:600;cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:0;font-family:inherit;}
 .toast-action:hover{text-decoration:underline;}
+/* SOURCES CHECKLIST */
+.sources-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 18px;margin-bottom:14px;}
+.sources-header{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap;}
+.sources-status{font-size:12px;color:var(--muted);margin-left:auto;}
+.sources-list{display:flex;gap:8px;flex-wrap:wrap;}
+.source-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border:1px solid var(--border);border-radius:20px;font-size:12px;cursor:pointer;background:var(--bg);user-select:none;color:var(--muted);}
+.source-pill:hover{background:var(--surface);}
+.source-pill.checked{border-color:var(--green);color:var(--green);background:var(--green-light);}
+.source-pill.detected{border-color:var(--green);color:var(--green);background:var(--green-light);cursor:default;}
+.source-pill .src-indicator{font-size:12px;line-height:1;font-weight:600;}
 /* TEXT-SIZE PICKER */
 .size-sel{font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-family:inherit;color:var(--text);cursor:pointer;}
 .size-sel:hover{background:var(--bg);}
@@ -378,6 +388,14 @@ body.text-xl .size-sel{font-size:15px;}
         <div class="sum-sub" id="s-daily-avg">—</div>
       </div>
     </div>
+  </div>
+  <!-- Sources for this month -->
+  <div class="sources-card">
+    <div class="sources-header">
+      <span class="chart-title" style="margin-bottom:0">Sources for this month</span>
+      <span class="sources-status" id="sources-status">—</span>
+    </div>
+    <div class="sources-list" id="sources-list"></div>
   </div>
   <!-- Four spending buckets -->
   <div class="buckets-row">
@@ -576,6 +594,12 @@ body.text-xl .size-sel{font-size:15px;}
     <div class="settings-title">Hidden Recurring Bills</div>
     <div class="settings-desc">Items you dismissed from the Recurring Bills card. Click × to make them eligible again.</div>
     <div id="recurring-ignored-list"></div>
+  </div>
+  <div class="settings-section">
+    <div class="settings-title">Expected Sources</div>
+    <div class="settings-desc">The Dashboard's "Sources for this month" checklist uses this list. A source auto-checks when it's found in the month's transactions.</div>
+    <div id="expected-sources-list"></div>
+    <button class="add-btn" onclick="addExpectedSource()">+ Add source</button>
   </div>
   <div class="settings-section">
     <div class="settings-title">Stored Data</div>
@@ -990,7 +1014,7 @@ function noteFmt(cmd){
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
-function renderDashboard(){updateSummary();renderBuckets();renderCharts();renderCatSummary();renderTrends();renderRecurring();}
+function renderDashboard(){updateSummary();renderBuckets();renderCharts();renderCatSummary();renderTrends();renderRecurring();renderSources();}
 
 function updateSummary(){
   const income=parseFloat(document.getElementById('income-inp').value)||0;
@@ -1053,8 +1077,10 @@ function renderBuckets(){
 }
 
 function renderCharts(){
-  const charges=filteredTransactions.filter(t=>t.amount>0);
-  const byCat={};charges.forEach(t=>{byCat[t.category]=(byCat[t.category]||0)+t.amount;});
+  // Net (charges minus refunds). The doughnut / horizontal bar can't render
+  // negative slices, so we drop categories/cards whose net ≤ 0.
+  const catNet={};filteredTransactions.forEach(t=>{catNet[t.category]=(catNet[t.category]||0)+t.amount;});
+  const byCat={};Object.entries(catNet).forEach(([c,v])=>{if(v>0)byCat[c]=v;});
   const catL=Object.keys(byCat).sort((a,b)=>byCat[b]-byCat[a]);
   if(catChart)catChart.destroy();
   catChart=new Chart(document.getElementById('cat-chart'),{
@@ -1063,7 +1089,8 @@ function renderCharts(){
     options:{responsive:true,maintainAspectRatio:false,onClick:(evt,els)=>{if(els.length)filterByCategory(catChart.data.labels[els[0].index]);},plugins:{legend:{position:'right',labels:{boxWidth:9,boxHeight:9,font:{size:10},padding:6}},tooltip:{callbacks:{label:ctx=>` ${ctx.label}: $${ctx.raw.toFixed(2)}`}}}}
   });
 
-  const byCard={};charges.forEach(t=>{byCard[t.card]=(byCard[t.card]||0)+t.amount;});
+  const cardNet={};filteredTransactions.forEach(t=>{cardNet[t.card]=(cardNet[t.card]||0)+t.amount;});
+  const byCard={};Object.entries(cardNet).forEach(([c,v])=>{if(v>0)byCard[c]=v;});
   const cardL=Object.keys(byCard);
   const cardColors=['#2d6a4f','#1e5fa8','#c07a14','#b5442a','#5b3fa6','#1a7a72'];
   if(cardChart)cardChart.destroy();
@@ -1085,16 +1112,19 @@ function renderCharts(){
 }
 
 function renderCatSummary(){
-  const charges=filteredTransactions.filter(t=>t.amount>0);
-  const byCat={};charges.forEach(t=>{byCat[t.category]=(byCat[t.category]||0)+t.amount;});
+  // Use NET amounts so refunds/credits reduce the category total (matches Total Spent semantics)
+  const byCat={};
+  filteredTransactions.forEach(t=>{byCat[t.category]=(byCat[t.category]||0)+t.amount;});
   const total=Object.values(byCat).reduce((s,v)=>s+v,0);
-  const sorted=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+  const sorted=Object.entries(byCat).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]));
   const body=document.getElementById('cat-summary-body');
+  const fmtSigned=v=>`${v<0?'-':''}$${Math.abs(v).toFixed(2)}`;
+  const colorFor=v=>v<0?'var(--green)':'inherit';
   body.innerHTML=sorted.map(([cat,amt])=>`<tr class="clickable" onclick="filterByCategory('${cat.replace(/'/g,"\\'")}')" title="View ${cat} transactions">
     <td><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${CAT_COLORS[cat]||'#888'};margin-right:6px;vertical-align:middle"></span>${cat}</td>
-    <td style="text-align:right;font-weight:500;font-variant-numeric:tabular-nums">$${amt.toFixed(2)}</td>
-    <td style="text-align:right;color:var(--muted)">${total?(amt/total*100).toFixed(1):0}%</td>
-  </tr>`).join('')+`<tr class="total-row"><td>Total</td><td style="text-align:right">$${total.toFixed(2)}</td><td></td></tr>`;
+    <td style="text-align:right;font-weight:500;font-variant-numeric:tabular-nums;color:${colorFor(amt)}">${fmtSigned(amt)}</td>
+    <td style="text-align:right;color:var(--muted)">${total?(Math.abs(amt)/Math.abs(total)*100).toFixed(1):0}%</td>
+  </tr>`).join('')+`<tr class="total-row"><td>Total</td><td style="text-align:right;color:${colorFor(total)}">${fmtSigned(total)}</td><td></td></tr>`;
 }
 
 // ── TRANSACTIONS TABLE ────────────────────────────────────────────
@@ -1473,6 +1503,39 @@ function renderRecurring(){
   }).join('');
   totalEl.textContent=items.reduce((s,r)=>s+r.amount,0).toFixed(2);
 }
+// ── SOURCES CHECKLIST ─────────────────────────────────────────────
+const DEFAULT_SOURCES=['Capital One','Chase Sapphire','Chase Freedom','Discover','Amex','Venmo','Zelle','Cash'];
+function renderSources(){
+  const wrap=document.getElementById('sources-list');const statusEl=document.getElementById('sources-status');
+  if(!wrap||!statusEl)return;
+  const sources=(settings.expectedSources&&settings.expectedSources.length)?settings.expectedSources:DEFAULT_SOURCES;
+  const detectedCards=[...new Set(filteredTransactions.map(t=>(t.card||'').toLowerCase()).filter(Boolean))];
+  const manuallyChecked=new Set(((settings.sourcesChecked||{})[selectedMonth]||[]).map(s=>s.toLowerCase()));
+  let done=0;
+  wrap.innerHTML=sources.map(s=>{
+    const lower=s.toLowerCase();
+    const isDetected=detectedCards.some(d=>d===lower||d.includes(lower)||lower.includes(d));
+    const isChecked=isDetected||manuallyChecked.has(lower);
+    if(isChecked)done++;
+    const cls=isDetected?'source-pill detected':(isChecked?'source-pill checked':'source-pill');
+    const title=isDetected?`Detected in this month's transactions`:(isChecked?'Marked as reconciled — click to un-mark':'Click to mark as reconciled');
+    const clickable=isDetected?'':`onclick="toggleSourceCheck('${s.replace(/'/g,"\\'")}')"`;
+    return `<span class="${cls}" ${clickable} title="${title}"><span class="src-indicator">${isChecked?'✓':'○'}</span>${s}</span>`;
+  }).join('');
+  const total=sources.length;
+  if(!selectedMonth){statusEl.textContent='';return;}
+  statusEl.textContent=done===total?`${done}/${total} · all reconciled ✓`:`${done}/${total} reconciled`;
+  statusEl.style.color=done===total?'var(--green)':'var(--muted)';
+}
+function toggleSourceCheck(source){
+  if(!selectedMonth)return;
+  settings.sourcesChecked=settings.sourcesChecked||{};
+  const list=settings.sourcesChecked[selectedMonth]=settings.sourcesChecked[selectedMonth]||[];
+  const idx=list.findIndex(s=>s.toLowerCase()===source.toLowerCase());
+  if(idx>-1)list.splice(idx,1);else list.push(source);
+  saveSettings();
+  renderSources();
+}
 // Jump to the Transactions tab filtered to one category (used by dashboard click-through)
 function filterByCategory(cat){
   switchTab('transactions');
@@ -1540,8 +1603,9 @@ function copyToClipboard(){
   navigator.clipboard.writeText(tsv).then(()=>showToast('✓ Copied — paste into Google Sheets')).catch(()=>showToast('Could not access clipboard'));
 }
 function renderExportSummary(){
+  // Use NET so the export matches the dashboard's category/bucket totals
   const byCat={};const byBucket={joint:0,hapi:0,medical:0,special:0};
-  filteredTransactions.filter(t=>t.amount>0).forEach(t=>{
+  filteredTransactions.forEach(t=>{
     byCat[t.category]=(byCat[t.category]||0)+t.amount;
     if(t.bucket&&t.bucket!=='none')byBucket[t.bucket]=(byBucket[t.bucket]||0)+t.amount;
   });
@@ -1618,6 +1682,13 @@ function renderSettings(){
       });
     }
   }
+  // Expected sources
+  const es=document.getElementById('expected-sources-list');
+  if(es){
+    const sources=(settings.expectedSources&&settings.expectedSources.length)?settings.expectedSources:DEFAULT_SOURCES.slice();
+    es.innerHTML='';
+    sources.forEach((s,i)=>es.appendChild(mkSourceRow(s,i)));
+  }
   updateDataStatus();
 }
 function mkCatEditRow(c,i){
@@ -1638,6 +1709,33 @@ function mkExRow(e,i){const d=document.createElement('div');d.className='rule-ro
 function addDescRule(){settings.descRules.push({text:'',cat:settings.categories[0]||'Other'});saveSettings();renderSettings();}
 function addCatRule(){settings.catRules.push({from:'',to:settings.categories[0]||'Other'});saveSettings();renderSettings();}
 function addExclusion(){settings.exclusions.push('');saveSettings();renderSettings();}
+function mkSourceRow(s,i){
+  const d=document.createElement('div');d.className='rule-row';
+  d.innerHTML=`<input class="rule-inp" placeholder="e.g., Capital One" value="${(s||'').replace(/"/g,'&quot;')}" oninput="updateExpectedSource(${i},this.value)"><button class="remove-btn" onclick="removeExpectedSource(${i})">×</button>`;
+  return d;
+}
+function ensureExpectedSources(){
+  if(!settings.expectedSources||!settings.expectedSources.length)settings.expectedSources=DEFAULT_SOURCES.slice();
+}
+function updateExpectedSource(i,v){
+  ensureExpectedSources();
+  settings.expectedSources[i]=v;
+  saveSettings();
+  renderSources();
+}
+function removeExpectedSource(i){
+  ensureExpectedSources();
+  settings.expectedSources.splice(i,1);
+  saveSettings();
+  renderSettings();
+  renderSources();
+}
+function addExpectedSource(){
+  ensureExpectedSources();
+  settings.expectedSources.push('');
+  saveSettings();
+  renderSettings();
+}
 
 // ── DRAG / NAV / TOAST ────────────────────────────────────────────
 function onDragOver(e){e.preventDefault();document.getElementById('drop-zone').classList.add('drag');}
