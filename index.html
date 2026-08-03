@@ -39,6 +39,13 @@ main{padding:22px 28px;max-width:1160px;margin:0 auto;}
 .file-icon{width:28px;height:28px;border-radius:5px;background:var(--green-light);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--green);flex-shrink:0;margin-right:10px;}
 .remove-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:17px;padding:2px 5px;border-radius:4px;}
 .remove-btn:hover{color:var(--red);}
+.import-report{margin-top:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;}
+.import-title{font-size:13px;font-weight:600;margin-bottom:8px;}
+.import-row{display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-top:1px solid var(--border);}
+.import-row:first-of-type{border-top:none;}
+.import-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:5px;}
+.import-file{font-size:12px;overflow-wrap:anywhere;}
+.import-detail{font-size:11px;color:var(--muted);overflow-wrap:anywhere;}
 .month-pills{display:flex;gap:5px;flex-wrap:wrap;margin-top:14px;}
 .month-pill{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--muted);transition:all .12s;}
 .month-pill.active{background:var(--green);color:#fff;border-color:var(--green);}
@@ -329,7 +336,7 @@ body.text-xl .size-sel{font-size:15px;}
   <div class="section-header">
     <div>
       <div class="section-title">Upload Statements</div>
-      <div class="section-sub">Drop all CSVs at once — Capital One, Chase Sapphire, Chase Freedom, Discover, and others</div>
+      <div class="section-sub">Drop all CSVs at once — Capital One, Chase, Discover, Amex, Citi, Bank of America, and others</div>
     </div>
     <button class="btn btn-primary" id="process-btn" disabled onclick="processFiles()">Process Files</button>
   </div>
@@ -338,10 +345,11 @@ body.text-xl .size-sel{font-size:15px;}
     ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
     <div style="font-size:32px;margin-bottom:10px">📂</div>
     <div style="font-size:15px;font-weight:600;margin-bottom:4px">Drop CSV files here, or click to browse</div>
-    <div style="color:var(--muted);font-size:12px">Capital One, Chase Sapphire, Chase Freedom, Discover — all at once</div>
+    <div style="color:var(--muted);font-size:12px">Capital One, Chase, Discover, Amex, Citi, Bank of America — all at once</div>
   </div>
   <input type="file" id="file-input" multiple accept=".csv,.CSV" onchange="handleFiles(this.files)">
   <div class="file-list" id="file-list"></div>
+  <div class="import-report" id="import-report" style="display:none"></div>
 </div>
 
 <!-- DASHBOARD -->
@@ -673,52 +681,123 @@ body.text-xl .size-sel{font-size:15px;}
 <div class="toast" id="toast"></div>
 
 <script>
+// ── HEADER / VALUE NORMALIZATION ─────────────────────────────────
+// Issuers punctuate headers however they like ("Trans. Date", "Card No.",
+// "Account #", "Amount ($)"), so every header is reduced to plain lowercase
+// words before profiles try to match it.
+function normHeader(h){
+  return String(h==null?'':h)
+    .replace(/^﻿/,'')
+    .replace(/^"+|"+$/g,'')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g,' ')
+    .trim();
+}
+// Money cells arrive as "$1,234.56", "(45.00)" for negatives, or blank.
+function num(v){
+  let s=String(v==null?'':v).replace(/[$\s,]/g,'');
+  if(!s)return 0;
+  let neg=false;
+  if(/^\(.*\)$/.test(s)){neg=true;s=s.slice(1,-1);}
+  if(s.startsWith('-')){neg=!neg;s=s.slice(1);}
+  const n=parseFloat(s);
+  if(isNaN(n))return 0;
+  return neg?-n:n;
+}
+// First key matching an exact name, else the first containing a fragment.
+function pickCol(row,exact,partial){
+  for(const n of exact)if(row[n]!==undefined)return n;
+  const keys=Object.keys(row);
+  for(const p of(partial||[])){const k=keys.find(k=>k.includes(p));if(k)return k;}
+  return '';
+}
+
 // ── CARD PROFILES ────────────────────────────────────────────────
+// App convention: positive amount = spending, negative = refund/credit.
+// Each issuer's own sign convention is normalized to that here.
 const CARD_PROFILES=[
   {
+    // Capital One: Transaction Date, Posted Date, Card No., Description, Category, Debit, Credit
     name:'Capital One',
-    detect:cols=>cols.includes('card no.'),
+    detect:c=>c.includes('card no')&&c.includes('debit')&&c.includes('credit'),
     parse:row=>({
-      date:row['transaction date']||'',
+      date:row['transaction date']||row['posted date']||'',
       description:row['description']||'',
       category:row['category']||'',
-      amount:parseFloat(row['debit']||0)-parseFloat(row['credit']||0)
+      amount:num(row['debit'])-num(row['credit'])
     })
   },
   {
     // Chase CSP / Freedom: Transaction Date, Post Date, Description, Category, Type, Amount, Memo
     name:'Chase',
-    detect:cols=>cols.includes('type')&&cols.includes('memo')&&cols.includes('post date'),
+    detect:c=>c.includes('post date')&&c.includes('type')&&(c.includes('memo')||c.includes('transaction date')),
     parse:row=>({
-      date:row['transaction date']||'',
+      date:row['transaction date']||row['post date']||'',
       description:row['description']||'',
       category:row['category']||'',
-      amount:-(parseFloat(row['amount']||0)) // Chase negatives = charges
+      amount:-num(row['amount']) // Chase negatives = charges
     })
   },
   {
     // Discover: Trans. Date, Post Date, Description, Amount, Category
     name:'Discover',
-    detect:cols=>cols.includes('trans. date')||cols.includes('trans date'),
+    detect:c=>c.includes('trans date')&&c.includes('amount'),
     parse:row=>({
-      date:row['trans. date']||row['trans date']||'',
+      date:row['trans date']||row['post date']||'',
       description:row['description']||'',
       category:row['category']||'',
-      amount:parseFloat(row['amount']||0)
+      amount:num(row['amount'])
     })
   },
   {
+    // Amex: Date, Description, Card Member, Account #, Amount (positives = charges)
+    name:'Amex',
+    detect:c=>c.includes('card member')||
+      (c.includes('account')&&c.includes('amount')&&c.includes('description')&&!c.includes('debit')),
+    parse:row=>({
+      date:row['date']||row['transaction date']||'',
+      description:row['description']||'',
+      category:row['category']||'',
+      amount:num(row['amount'])
+    })
+  },
+  {
+    // Citi: Status, Date, Description, Debit, Credit (credits are already negative)
+    name:'Citi',
+    detect:c=>c.includes('status')&&c.includes('debit')&&c.includes('credit'),
+    parse:row=>{
+      const cr=num(row['credit']);
+      return{
+        date:row['date']||row['transaction date']||'',
+        description:row['description']||'',
+        category:row['category']||'',
+        amount:num(row['debit'])-Math.abs(cr)
+      };
+    }
+  },
+  {
+    // Bank of America: Posted Date, Reference Number, Payee, Address, Amount (negatives = charges)
+    name:'Bank of America',
+    detect:c=>c.includes('payee')||(c.includes('reference number')&&c.includes('amount')),
+    parse:row=>({
+      date:row['posted date']||row['transaction date']||row['date']||'',
+      description:row['payee']||row['description']||'',
+      category:row['category']||'',
+      amount:-num(row['amount'])
+    })
+  },
+  {
+    // Fallback: guess the columns by name. Assumes positive = spending.
     name:'Other',
     detect:()=>true,
     parse:row=>{
-      const keys=Object.keys(row).filter(k=>!k.startsWith('_'));
-      const dk=keys.find(k=>k.includes('date'))||'';
-      const desk=keys.find(k=>k.includes('desc'))||'';
-      const ck=keys.find(k=>k.includes('cat'))||'';
-      const ak=keys.find(k=>k.includes('amount')||k.includes('debit'))||'';
-      const crk=keys.find(k=>k.includes('credit'))||'';
-      let amount=parseFloat(row[ak]||0);
-      if(crk&&row[crk])amount-=parseFloat(row[crk]||0);
+      const dk=pickCol(row,['transaction date','trans date','date','posted date','post date','posting date'],['date']);
+      const desk=pickCol(row,['description','payee','merchant','merchant name','name','memo','details'],['desc','payee','merchant','memo']);
+      const ck=pickCol(row,['category'],['categor']);
+      const ak=pickCol(row,['amount','debit','withdrawal'],['amount','debit']);
+      const crk=pickCol(row,['credit','deposit'],['credit']);
+      let amount=num(row[ak]);
+      if(crk&&crk!==ak&&row[crk])amount-=Math.abs(num(row[crk]));
       return{date:row[dk]||'',description:row[desk]||'',category:row[ck]||'',amount};
     }
   }
@@ -827,14 +906,28 @@ function getTxnByIdx(idx){return tableScopeAll?allTransactions[idx]:filteredTran
 
 // ── CSV PARSER ────────────────────────────────────────────────────
 function parseCSV(text){
-  const lines=text.trim().split(/\r?\n/);
+  const lines=String(text||'').replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());
   if(!lines.length)return[];
-  const headers=lines[0].split(',').map(h=>h.replace(/^"|"$/g,'').trim().toLowerCase());
-  return lines.slice(1).filter(l=>l.trim()).map(line=>{
+  const hi=findHeaderLine(lines);
+  const headers=splitLine(lines[hi]).map(normHeader);
+  return lines.slice(hi+1).map(line=>{
     const vals=splitLine(line);const obj={};
-    headers.forEach((h,i)=>{obj[h]=(vals[i]||'').replace(/^"|"$/g,'').trim();});
+    headers.forEach((h,i)=>{if(h)obj[h]=(vals[i]||'').replace(/^"|"$/g,'').trim();});
     return obj;
-  });
+  }).filter(o=>Object.values(o).some(v=>v!==''));
+}
+// Some exports put account summaries or blank junk above the real header row.
+// The header is the first line carrying both a date-ish and a money-ish column.
+function findHeaderLine(lines){
+  const limit=Math.min(lines.length,15);
+  for(let i=0;i<limit;i++){
+    const cells=splitLine(lines[i]).map(normHeader);
+    if(cells.length<2)continue;
+    const hasDate=cells.some(c=>/(^|\s)date(\s|$)/.test(c));
+    const hasAmt=cells.some(c=>/(amount|debit|credit|withdrawal|deposit)/.test(c));
+    if(hasDate&&hasAmt)return i;
+  }
+  return 0;
 }
 function splitLine(line){
   const res=[];let cur='',inQ=false;
@@ -846,13 +939,20 @@ function splitLine(line){
   }
   res.push(cur);return res;
 }
+const MONTH_ABBR={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
 function parseDate(s){
+  if(s==null)return null;
+  s=String(s).trim().replace(/^"|"$/g,'');
   if(!s)return null;
-  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  // "Jul 03, 2026" / "July 3 2026"
+  let m=s.match(/^([a-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})$/i);
+  if(m&&MONTH_ABBR[m[1].toLowerCase()]!==undefined)return new Date(+m[3],MONTH_ABBR[m[1].toLowerCase()],+m[2]);
+  s=s.split(/[ T]/)[0]; // drop any time component
+  m=s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
   if(m)return new Date(+m[1],+m[2]-1,+m[3]);
-  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  m=s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/);
   if(m)return new Date(+m[3],+m[1]-1,+m[2]);
-  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  m=s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2})$/);
   if(m)return new Date(+m[3]+2000,+m[1]-1,+m[2]);
   return null;
 }
@@ -879,35 +979,47 @@ function applyExclusions(){
 }
 
 // ── FILE HANDLING ─────────────────────────────────────────────────
+// Several issuers export under the same generic filename ("activity.csv"), so
+// files are keyed by name+size+timestamp — keying on name alone dropped all but
+// the first of them before they were ever read.
+function fileKey(f){return `${f.name}|${f.size}|${f.lastModified}`;}
 function handleFiles(files){
-  for(const f of files)if(!rawFiles.find(r=>r.name===f.name))rawFiles.push(f);
+  for(const f of files){
+    const key=fileKey(f);
+    if(!rawFiles.find(r=>r.key===key))rawFiles.push({key,file:f});
+  }
   renderFileList();
 }
-function removeFile(name){rawFiles=rawFiles.filter(f=>f.name!==name);delete fileCards[name];renderFileList();}
-function setFileCard(name,val){fileCards[name]=val;}
+function removeFile(key){rawFiles=rawFiles.filter(r=>r.key!==key);delete fileCards[key];renderFileList();}
+function setFileCard(key,val){fileCards[key]=val;}
 function getCardName(filename,fallback){
   const fn=filename.toLowerCase();
-  if(fn.includes('csp'))return'Chase Sapphire';
+  if(fn.includes('csp')||fn.includes('sapphire'))return'Chase Sapphire';
   if(fn.includes('freedom'))return'Chase Freedom';
-  if(fn.includes('cap')||fn.includes('capital'))return'Capital One';
+  if(fn.includes('capitalone')||fn.includes('capital_one')||fn.includes('capital one')||fn.includes('capone'))return'Capital One';
   if(fn.includes('discover'))return'Discover';
+  if(fn.includes('amex')||fn.includes('americanexpress')||fn.includes('american express'))return'Amex';
+  if(fn.includes('citi'))return'Citi';
+  if(fn.includes('bofa')||fn.includes('bankofamerica')||fn.includes('bank of america'))return'Bank of America';
   return fallback;
 }
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function renderFileList(){
   const list=document.getElementById('file-list');list.innerHTML='';
-  rawFiles.forEach(f=>{
+  rawFiles.forEach(r=>{
+    const f=r.file;
     const detected=getCardName(f.name,'');
-    const cardVal=fileCards[f.name]!==undefined?fileCards[f.name]:detected;
-    const safe=f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const cardVal=fileCards[r.key]!==undefined?fileCards[r.key]:detected;
+    const safe=r.key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     const item=document.createElement('div');item.className='file-item';
     item.innerHTML=`<div style="display:flex;align-items:center;flex:1;min-width:0">
       <div class="file-icon">CSV</div>
       <div style="min-width:0">
-        <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.name}</div>
+        <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.name)}</div>
         <div style="font-size:11px;color:var(--muted)">${(f.size/1024).toFixed(1)} KB</div>
       </div></div>
       <div style="display:flex;align-items:center;gap:8px;margin-left:10px">
-        <input class="card-name-inp" list="card-names" value="${cardVal.replace(/"/g,'&quot;')}" placeholder="Auto-detect" title="Card name for this file" onchange="setFileCard('${safe}',this.value)">
+        <input class="card-name-inp" list="card-names" value="${esc(cardVal)}" placeholder="Auto-detect" title="Card name for this file" onchange="setFileCard('${safe}',this.value)">
         <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:20px;background:var(--green-light);color:var(--green)">Ready</span>
         <button class="remove-btn" onclick="removeFile('${safe}')">×</button>
       </div>`;
@@ -920,43 +1032,87 @@ function renderFileList(){
 // ── PROCESS ───────────────────────────────────────────────────────
 function processFiles(){
   let pending=rawFiles.length;if(!pending)return;
-  const incoming=[];
-  rawFiles.forEach(f=>{
+  const incoming=[],reports=[];
+  rawFiles.forEach(r=>{
+    const f=r.file;
     const reader=new FileReader();
+    const done=()=>{if(--pending===0)mergeAndFinalize(incoming,reports);};
+    // Without this a single unreadable file left `pending` above zero forever
+    // and nothing at all was imported.
+    reader.onerror=()=>{
+      reports.push({name:f.name,card:'—',rows:0,kept:0,error:'file could not be read'});
+      done();
+    };
     reader.onload=e=>{
-      const rows=parseCSV(e.target.result);
-      if(rows.length){
-        const cols=Object.keys(rows[0]).map(k=>k.toLowerCase());
-        const profile=CARD_PROFILES.find(p=>p.detect(cols));
-        const override=fileCards[f.name]&&fileCards[f.name].trim();
-        const cardName=override||getCardName(f.name,profile.name);
-        rows.forEach(row=>{
-          const raw=profile.parse(row);
-          if(!raw.date)return;
-          const dateObj=parseDate(raw.date);
-          if(!dateObj||isNaN(dateObj))return;
-          if(isNaN(raw.amount)||raw.amount===0)return;
-          const category=applyCategory(raw);
-          const txn={...raw,dateObj,category,card:cardName,bucket:settings.bucketDefaults[category]||'none'};
-          if(!shouldExclude(txn))incoming.push(txn);
-        });
-      }
-      if(--pending===0)mergeAndFinalize(incoming);
+      const rep={name:f.name,card:'—',profile:'—',rows:0,kept:0,noDate:0,noAmount:0,excluded:0};
+      try{
+        const rows=parseCSV(e.target.result);
+        rep.rows=rows.length;
+        if(!rows.length){
+          rep.error='no header row with a date and an amount column was found';
+        }else{
+          const cols=Object.keys(rows[0]);
+          const profile=CARD_PROFILES.find(p=>p.detect(cols))||CARD_PROFILES[CARD_PROFILES.length-1];
+          const override=fileCards[r.key]&&fileCards[r.key].trim();
+          const cardName=override||getCardName(f.name,profile.name);
+          rep.card=cardName;rep.profile=profile.name;
+          rows.forEach(row=>{
+            const raw=profile.parse(row);
+            const dateObj=raw.date?parseDate(raw.date):null;
+            if(!dateObj||isNaN(dateObj)){rep.noDate++;return;}
+            if(isNaN(raw.amount)||raw.amount===0){rep.noAmount++;return;}
+            const category=applyCategory(raw);
+            const txn={...raw,dateObj,category,card:cardName,bucket:settings.bucketDefaults[category]||'none'};
+            if(shouldExclude(txn)){rep.excluded++;return;}
+            incoming.push(txn);rep.kept++;
+          });
+        }
+      }catch(err){rep.error=(err&&err.message)||'could not be parsed';}
+      reports.push(rep);
+      done();
     };
     reader.readAsText(f);
   });
 }
 // Merge new uploads into the stored set, skipping duplicates already present
-function mergeAndFinalize(incoming){
+function mergeAndFinalize(incoming,reports){
+  reports=reports||[];
   const seen=new Set(allTransactions.map(txnSig));
   let added=0;
   incoming.forEach(t=>{const s=txnSig(t);if(!seen.has(s)){seen.add(s);allTransactions.push(t);added++;}});
   applyExclusions(); // honor exclusions retroactively, including previously-stored rows
   saveTransactions();
   const dup=incoming.length-added;
+  renderImportReport(reports);
   rebuildMonths(selectedMonth);
-  showToast(`✓ Added ${added} new transaction${added!==1?'s':''}${dup>0?` · ${dup} duplicate${dup!==1?'s':''} skipped`:''}`);
-  switchTab('dashboard');
+  const bad=reports.filter(r=>r.error||!r.kept).length;
+  showToast(`✓ Added ${added} new transaction${added!==1?'s':''}`+
+    `${dup>0?` · ${dup} duplicate${dup!==1?'s':''} skipped`:''}`+
+    `${bad?` · ${bad} file${bad!==1?'s':''} imported nothing — see Upload tab`:''}`);
+  // Stay on Upload when something failed so the reason is actually visible.
+  if(!bad)switchTab('dashboard');
+}
+// Per-file outcome for the last run — a file that yields nothing used to fail silently.
+function renderImportReport(reports){
+  const el=document.getElementById('import-report');if(!el)return;
+  if(!reports.length){el.style.display='none';el.innerHTML='';return;}
+  el.style.display='block';
+  el.innerHTML=`<div class="import-title">Import results</div>`+reports.map(r=>{
+    const ok=!r.error&&r.kept>0;
+    const bits=[];
+    if(r.noDate)bits.push(`${r.noDate} with no usable date`);
+    if(r.noAmount)bits.push(`${r.noAmount} with no amount`);
+    if(r.excluded)bits.push(`${r.excluded} excluded by your rules`);
+    const detail=r.error
+      ? r.error
+      : `read as ${r.profile} · ${r.kept} of ${r.rows} row${r.rows!==1?'s':''} imported${bits.length?` · ${bits.join(', ')}`:''}`;
+    return `<div class="import-row">
+      <span class="import-dot" style="background:${ok?'var(--green)':'var(--red)'}"></span>
+      <div style="min-width:0">
+        <div class="import-file">${esc(r.name)} → <strong>${esc(r.card)}</strong></div>
+        <div class="import-detail">${esc(detail)}</div>
+      </div></div>`;
+  }).join('');
 }
 function rebuildMonths(preferMonth){
   allTransactions.sort((a,b)=>a.dateObj-b.dateObj);
@@ -1504,7 +1660,7 @@ function renderRecurring(){
   totalEl.textContent=items.reduce((s,r)=>s+r.amount,0).toFixed(2);
 }
 // ── SOURCES CHECKLIST ─────────────────────────────────────────────
-const DEFAULT_SOURCES=['Capital One','Chase Sapphire','Chase Freedom','Discover','Amex','Venmo','Zelle','Cash'];
+const DEFAULT_SOURCES=['Capital One','Chase Sapphire','Chase Freedom','Discover','Amex','Citi','Bank of America','Venmo','Zelle','Cash'];
 function renderSources(){
   const wrap=document.getElementById('sources-list');const statusEl=document.getElementById('sources-status');
   if(!wrap||!statusEl)return;
@@ -1514,7 +1670,10 @@ function renderSources(){
   let done=0;
   wrap.innerHTML=sources.map(s=>{
     const lower=s.toLowerCase();
-    const isDetected=detectedCards.some(d=>d===lower||d.includes(lower)||lower.includes(d));
+    // Match exactly, or on a more specific card name ("Chase Sapphire Reserve"
+    // ticks "Chase Sapphire"). A vaguer card must NOT tick a specific source —
+    // a file labelled just "Chase" used to check off both Chase cards at once.
+    const isDetected=detectedCards.some(d=>d===lower||d.startsWith(lower+' '));
     const isChecked=isDetected||manuallyChecked.has(lower);
     if(isChecked)done++;
     const cls=isDetected?'source-pill detected':(isChecked?'source-pill checked':'source-pill');
